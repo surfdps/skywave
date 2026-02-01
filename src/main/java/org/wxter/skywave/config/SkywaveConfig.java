@@ -1,3 +1,4 @@
+// src/main/java/org/wxter/skywave/config/SkywaveConfig.java
 package org.wxter.skywave.config;
 
 import com.google.gson.Gson;
@@ -10,16 +11,17 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class SkywaveConfig {
 
     public enum RainReminderType {
-        CHAT,      // отправлять в чат
-        ONSCREEN   // отображать крупным текстом сверху
+        CHAT,
+        ONSCREEN
     }
 
-    /** Display mode for various trackers (Total = persistent total, Session = current run only). */
     public enum DisplayMode {
         TOTAL,
         SESSION
@@ -30,66 +32,57 @@ public class SkywaveConfig {
 
     private static SkywaveConfig INSTANCE;
 
-    // ===== НАСТРОЙКИ =====
+    // ===== GENERAL =====
     public boolean rainReminderEnabled = true;
     public boolean rainReminderSound = true;
-
     public RainReminderType rainReminderType = RainReminderType.CHAT;
 
-    /** Enable mob highlight by nametag (works with custom names, scoreboard team names, and Hypixel-style armor stand name tags). */
     public boolean mobHighlightEnabled = true;
-
-    /** Nametags to highlight (e.g. "Night Squid", "Golden Goblin"). Matches entity display name from any source. */
     public List<String> mobHighlightNametags = new ArrayList<>(List.of("Night Squid"));
-
-    /** ARGB (int) — highlight outline color (default: deep sky blue 0xFF00BFFF). */
     public int mobHighlightColor = 0xFF00BFFF;
-    // ======================
+    // ===================
 
-    // ===== HUNTING PROFIT TRACKER CONFIG =====
+    // ===== HUNTING TRACKER =====
     public HuntingConfig hunting = new HuntingConfig();
 
     public static class HuntingConfig {
-        /** Enable the Hunting Profit Tracker (HUD + parsing). */
         public boolean profitTrackerEnabled = false;
-
-        /** Show session timer on HUD. */
         public boolean showTimer = true;
-
-        /** Which value HUD shows by default (Total: persistent, Session: current counting session). */
         public DisplayMode displayMode = DisplayMode.SESSION;
 
-        /**
-         * List of regex patterns (Java regex) used to parse chat messages and extract shard counts.
-         * These are user-editable — Hypixel strings sometimes change, so tweak them if needed.
-         * Capture group 1 should contain the numeric count when possible.
-         */
         public List<String> chatPatterns = new ArrayList<>(List.of(
-                // flexible defaults — adjust to exact Hypixel chat lines if necessary
-                // Generic shard gain
+                // generic
                 "(?:You found|You received|You obtained|You got) .*Shard.* x?(\\d+)",
-
-                // Loot Share assist message
+                // loot share
                 "LOOT SHARE You received (\\d+) .+? Shards",
                 "LOOT SHARE You received (\\d+) .+? Shard",
-
-                // Basic shard message
+                // caught messages (handles x2 and 2)
                 "You caught x?(\\d+) .+? Shards",
                 "You caught ?(\\d+) .+? Shard",
-
-                // Fallback generic
+                // fallback
                 "(.+Shard.+) x?(\\d+)",
                 "Picked up (\\d+)x? (?:.*Shard.*)"
         ));
 
-        /** HUD position (pixels, scaled screen coords). */
         public int hudX = 8;
         public int hudY = 40;
 
-        /** Persistent total of shards (saved in the config file). */
+        /** Legacy aggregated single total */
         public long totalShards = 0L;
+
+        /** Optional per-item totals persisted */
+        public Map<String, Long> huntingTotals = new HashMap<>();
+
+        /** Show unit prices on HUD (requires hypixelApiKey) */
+        public boolean showUnitPrices = true;
     }
-    // ==========================================
+    // ============================
+
+    // ===== Hypixel API =====
+    public String hypixelApiKey = "7cbe2e60-cb47-41c8-bee0-90129cbc9150";
+    /** minutes */
+    public int bazaarRefreshMinutes = 5;
+    // =======================
 
     public static SkywaveConfig get() {
         if (INSTANCE == null) load();
@@ -113,9 +106,7 @@ public class SkywaveConfig {
     public static void save() {
         try {
             Path dir = FILE.getParent();
-            if (dir != null && !Files.exists(dir)) {
-                Files.createDirectories(dir);
-            }
+            if (dir != null && !Files.exists(dir)) Files.createDirectories(dir);
             try (Writer writer = Files.newBufferedWriter(FILE)) {
                 GSON.toJson(INSTANCE, writer);
             }

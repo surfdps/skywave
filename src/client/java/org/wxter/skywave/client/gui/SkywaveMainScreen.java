@@ -1,5 +1,6 @@
 package org.wxter.skywave.client.gui;
 
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -22,17 +23,19 @@ public class SkywaveMainScreen extends Screen {
 
         addDrawableChild(ButtonWidget.builder(Text.literal("Config"), b ->
                 client.setScreen(SkywaveYaclGui.create(this))
-        ).dimensions(centerX - 100, centerY - 10, 200, 20).build());
+        ).dimensions(centerX - 100, centerY - 30, 200, 20).build());
+
+        addDrawableChild(ButtonWidget.builder(Text.literal("Move GUI"), b ->
+                client.setScreen(new SkywaveHudMoveScreen(MinecraftClient.getInstance().currentScreen))
+        ).dimensions(centerX - 100, centerY - 5, 200, 20).build());
 
         addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b ->
                 client.setScreen(parent)
-        ).dimensions(centerX - 100, centerY + 15, 200, 20).build());
+        ).dimensions(centerX - 100, centerY + 20, 200, 20).build());
     }
 
     @Override
     public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-
-//        this.renderDarkening(ctx);
         ctx.fillGradient(0, 0, width, height, 0xC0101010, 0xD0101010);
 
         int centerX = this.width / 2;
@@ -42,18 +45,17 @@ public class SkywaveMainScreen extends Screen {
                 Text.literal("Skywave").formatted(Formatting.AQUA, Formatting.BOLD),
                 centerX,
                 this.height / 2 - 50,
-                0xFFFFFFFF // белый с полной альфой
+                0xFFFFFFFF
         );
 
         ctx.drawCenteredTextWithShadow(
                 this.textRenderer,
-                Text.literal("v0.2  •  by wxxve").formatted(Formatting.GRAY),
+                Text.literal("v1.2  •  by wxxve & eseoo").formatted(Formatting.GRAY),
                 centerX,
                 this.height / 2 - 35,
-                0xFFB8B8B8 // светло-серый с полной альфой
+                0xFFB8B8B8
         );
 
-        // Теперь рендерим кнопки/виджеты поверх фона
         super.render(ctx, mouseX, mouseY, delta);
     }
 }
