@@ -1,0 +1,27 @@
+# Gradle
+.gradle/
+build/
+
+# Fabric / Minecraft run directory
+run/
+
+# IDE
+.idea/
+*.iml
+out/
+
+# Java
+*.class
+*.jar
+*.war
+*.log
+*.ctxt
+.mtj.tmp/
+hs_err_pid*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config (uncomment if you keep local overrides here)
+# gradle.properties

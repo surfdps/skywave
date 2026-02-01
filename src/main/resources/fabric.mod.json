@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "skywave",
+  "version": "1.0.0",
+  "name": "Skywave",
+  "description": "A tool for QOL features that nobody asked for :)\nRequires YetAnotherConfigLib.",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/skywave/icon.png",
+  "entrypoints": {
+    "fabric-datagen": [
+      "org.wxter.skywave.client.SkywaveDataGenerator"
+    ],
+    "client": [
+      "org.wxter.skywave.client.SkywaveClient"
+    ],
+    "main": [
+      "org.wxter.skywave.Skywave"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "fabric-api": "*",
+    "minecraft": "1.21.10",
+    "yet_another_config_lib_v3": ">=3.8.2+1.21.10-fabric"
+  },
+  "mixins": [
+    "skywave.mixins.json",
+    "skywave.client.mixins.json"
+  ],
+  "client": {
+    "mixins": [
+      "skywave.client.mixins.json"
+    ]
+  }
+}
