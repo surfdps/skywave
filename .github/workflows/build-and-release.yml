@@ -21,6 +21,11 @@ jobs:
           distribution: "temurin"
           cache: "gradle"
 
+      - name: Download Gradle Wrapper JAR
+        run: |
+          GRADLE_VERSION=$(sed -n 's/.*gradle-\([0-9.]*\)-bin.zip.*/\1/p' gradle/wrapper/gradle-wrapper.properties)
+          curl -sL -o gradle/wrapper/gradle-wrapper.jar "https://github.com/gradle/gradle/raw/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar"
+
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
