@@ -1,14 +1,14 @@
 package org.wxter.skywave.client.tracker;
 
-import com.google.gson.*;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
-import org.wxter.skywave.client.gui.SkywaveHudMoveScreen;
 import org.wxter.skywave.config.SkywaveConfig;
 
 import java.io.IOException;
@@ -17,8 +17,15 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -26,26 +33,18 @@ public class HuntingProfitTracker {
 
     public static final HuntingProfitTracker INSTANCE = new HuntingProfitTracker();
 
-    private final ConcurrentHashMap<String, Long> sessionCounts = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Long> totalCounts = new ConcurrentHashMap<>();
+    private static final int TITLE_COLOR = 0xFF55FFFF;
+    private static final int ACTION_COLOR = 0xFFFFFF55;
+    private static final int VALUE_COLOR = 0xFFFFAA;
+    private static final int MUTED_COLOR = 0xFFB0B0B0;
 
-    private volatile boolean running = false;
+    private final ItemTrackerState trackerState = new ItemTrackerState(new HuntingStorage());
+    private final List<ClickableRegion> clickRegions = new ArrayList<>();
 
-    private long sessionStartMillis = 0L;
-    private boolean timerPaused = false;
-    private long pausedAtMillis = 0L;
-    private long accumulatedPausedMillis = 0L;
-
-    // HUD position & size
-    private int hudW = 260;
-    private int hudH = 120;
-
-    // dragging
     private boolean moveMode = false;
-    private boolean dragging = false;
-    private int dragOffsetX, dragOffsetY;
-
     private boolean lastLeftWasDown = false;
+
+    private HudBounds lastHudBounds = new HudBounds(0, 0, 0, 0);
 
     private final BazaarPriceFetcher priceFetcher = new BazaarPriceFetcher();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -62,7 +61,9 @@ public class HuntingProfitTracker {
                 if (SkywaveConfig.get().hypixelApiKey != null && !SkywaveConfig.get().hypixelApiKey.isEmpty()) {
                     priceFetcher.refreshAll();
                 }
-            } catch (Throwable t) { t.printStackTrace(); }
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
         }, initial, periodMinutes, TimeUnit.MINUTES);
     }
 
@@ -70,20 +71,24 @@ public class HuntingProfitTracker {
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             try {
                 if (message != null) handleChatMessage(message.getString());
-            } catch (Throwable t) { t.printStackTrace(); }
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
         });
 
         HudRenderCallback.EVENT.register((drawContext, tick) -> {
             try {
                 onHudRender(drawContext);
-            } catch (Throwable t) { t.printStackTrace(); }
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
         });
     }
 
     private void handleChatMessage(String raw) {
         if (raw == null) return;
         SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
-        if (cfg == null || !cfg.profitTrackerEnabled) return;
+        if (cfg == null || !cfg.profitTrackerEnabled || !trackerState.isRunning()) return;
 
         String plain = stripColorCodes(raw).trim();
         if (plain.isEmpty()) return;
@@ -101,7 +106,8 @@ public class HuntingProfitTracker {
                         break;
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
 
         if (!matched && plain.toLowerCase().contains("shard")) {
@@ -114,7 +120,15 @@ public class HuntingProfitTracker {
         return s == null ? "" : s.replaceAll("§.", "");
     }
 
-    private static class ParsedResult { final String name; final int count; ParsedResult(String n, int c){name=n;count=c;} }
+    private static class ParsedResult {
+        final String name;
+        final int count;
+
+        ParsedResult(String n, int c) {
+            name = n;
+            count = c;
+        }
+    }
 
     private ParsedResult parseFromMatcher(Matcher m, String plain) {
         int foundCount = 0;
@@ -124,7 +138,10 @@ public class HuntingProfitTracker {
             if (g == null) continue;
             String digits = g.replaceAll("[^0-9]", "");
             if (!digits.isEmpty()) {
-                try { foundCount = Integer.parseInt(digits); } catch (Exception ignored) {}
+                try {
+                    foundCount = Integer.parseInt(digits);
+                } catch (Exception ignored) {
+                }
                 continue;
             }
             if (foundName == null && g.trim().length() > 0) {
@@ -156,14 +173,21 @@ public class HuntingProfitTracker {
         int count = 1;
         if (mn.find()) {
             String g = mn.group(1) != null ? mn.group(1) : mn.group(2);
-            try { count = Integer.parseInt(g); } catch (Exception ignored) {}
+            try {
+                count = Integer.parseInt(g);
+            } catch (Exception ignored) {
+            }
             before = before.substring(0, mn.start()).trim();
         } else {
             Matcher anyNum = Pattern.compile("(\\d+)").matcher(before);
             String last = null;
             while (anyNum.find()) last = anyNum.group(1);
             if (last != null) {
-                try { count = Integer.parseInt(last); } catch (Exception ignored) { count = 1; }
+                try {
+                    count = Integer.parseInt(last);
+                } catch (Exception ignored) {
+                    count = 1;
+                }
                 before = before.replaceFirst("\\b" + last + "\\b\\s*$", "").trim();
             }
         }
@@ -178,81 +202,41 @@ public class HuntingProfitTracker {
     private void recordShard(String rawName, int count) {
         if (rawName == null || rawName.isEmpty()) rawName = "Shard";
         String name = normalizeName(rawName);
-
-        sessionCounts.merge(name, (long) count, Long::sum);
-        totalCounts.merge(name, (long) count, Long::sum);
-
-        SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
-        if (cfg != null) {
-            cfg.totalShards += count;
-            long prev = cfg.huntingTotals.getOrDefault(name, 0L);
-            cfg.huntingTotals.put(name, prev + count);
-            SkywaveConfig.save();
-        }
+        trackerState.recordItem(name, count);
     }
 
-    private String normalizeName(String s) { return s.trim(); }
+    private String normalizeName(String s) {
+        return s.trim();
+    }
 
     public synchronized void startSession() {
-        if (running) return;
-        running = true;
-        sessionStartMillis = System.currentTimeMillis();
-        timerPaused = false;
-        accumulatedPausedMillis = 0;
-        pausedAtMillis = 0;
-        sessionCounts.clear();
+        trackerState.startSession();
     }
 
-    public synchronized void stopSession() { running = false; }
+    public synchronized void stopSession() {
+        trackerState.stopSession();
+    }
 
     public synchronized void reset(SkywaveConfig.DisplayMode mode) {
-        SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
-        if (mode == SkywaveConfig.DisplayMode.TOTAL) {
-            if (cfg != null) cfg.totalShards = 0L;
-            cfg.huntingTotals.clear();
-            totalCounts.clear();
-            sessionCounts.clear();
-            SkywaveConfig.save();
-        } else {
-            sessionCounts.clear();
-        }
+        trackerState.reset(mode);
     }
 
-    public synchronized boolean isRunning() { return running; }
+    public synchronized boolean isRunning() {
+        return trackerState.isRunning();
+    }
 
     public synchronized String getSessionUptimeFormatted() {
-        if (!running) return "00:00:00";
-        long now = System.currentTimeMillis();
-        long elapsed = now - sessionStartMillis - accumulatedPausedMillis;
-        if (timerPaused && pausedAtMillis > 0) elapsed = pausedAtMillis - sessionStartMillis - accumulatedPausedMillis;
-        Duration d = Duration.ofMillis(Math.max(0, elapsed));
-        long hours = d.toHours();
-        long minutes = d.toMinutesPart();
-        long seconds = d.toSecondsPart();
-        return String.format("%02d:%02d:%02d", hours, minutes, seconds);
+        return trackerState.getSessionUptimeFormatted();
     }
 
     public synchronized double getSessionHoursElapsed() {
-        if (!running) return 0.0;
-        long now = System.currentTimeMillis();
-        long elapsed = now - sessionStartMillis - accumulatedPausedMillis;
-        if (timerPaused && pausedAtMillis > 0) elapsed = pausedAtMillis - sessionStartMillis - accumulatedPausedMillis;
-        return Math.max(0.0, elapsed / 3600000.0);
+        return trackerState.getSessionHoursElapsed();
     }
 
     public synchronized void toggleTimerPause() {
-        if (!running) return;
-        if (!timerPaused) {
-            timerPaused = true;
-            pausedAtMillis = System.currentTimeMillis();
-        } else {
-            timerPaused = false;
-            if (pausedAtMillis > 0) accumulatedPausedMillis += System.currentTimeMillis() - pausedAtMillis;
-            pausedAtMillis = 0;
-        }
+        trackerState.toggleTimerPause();
     }
 
-    // ================= HUD rendering =================
     public void onHudRender(DrawContext ctx) {
         SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
         if (cfg == null || !cfg.profitTrackerEnabled) return;
@@ -260,96 +244,205 @@ public class HuntingProfitTracker {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null) return;
 
-        if (client.currentScreen != null && !(client.currentScreen instanceof SkywaveHudMoveScreen)) {
-            drawHudOnly(ctx, cfg);
-            return; // клики и dragging не трогаем
-        }
-
-        drawHudWithDragging(ctx, cfg, client);
+        boolean allowClicks = !moveMode && client.currentScreen == null;
+        drawHud(ctx, cfg, client, allowClicks);
     }
 
-    private void drawHudOnly(DrawContext ctx, SkywaveConfig.HuntingConfig cfg) {
+    private void drawHud(DrawContext ctx, SkywaveConfig.HuntingConfig cfg, MinecraftClient client, boolean allowClicks) {
         int x = cfg.hudX;
         int y = cfg.hudY;
 
-        Map<String, Long> counts = (cfg.displayMode == SkywaveConfig.DisplayMode.TOTAL) ? cfg.huntingTotals : sessionCounts;
+        TextRenderer tr = client.textRenderer;
+        clickRegions.clear();
+
+        List<DisplayLine> lines = buildLines(cfg);
+        int lineHeight = tr.fontHeight + 2;
+
+        int maxWidth = 0;
+        int ly = y;
+        for (DisplayLine line : lines) {
+            int width = tr.getWidth(line.text());
+            maxWidth = Math.max(maxWidth, width);
+            ctx.drawTextWithShadow(tr, line.text(), x, ly, line.color());
+            if (allowClicks && line.onClick() != null) {
+                clickRegions.add(new ClickableRegion(x, ly, width, tr.fontHeight, line.onClick()));
+            }
+            ly += lineHeight;
+        }
+
+        lastHudBounds = new HudBounds(x, y, maxWidth, Math.max(0, lines.size() * lineHeight));
+
+        if (allowClicks) {
+            handleClicks(client);
+        }
+    }
+
+    private List<DisplayLine> buildLines(SkywaveConfig.HuntingConfig cfg) {
+        List<DisplayLine> lines = new ArrayList<>();
+        lines.add(new DisplayLine("Hunting Profit Tracker", TITLE_COLOR, null));
+
+        String startLabel = trackerState.isRunning() ? "Stop Count" : "Start Count";
+        lines.add(new DisplayLine(startLabel, ACTION_COLOR, () -> {
+            if (trackerState.isRunning()) stopSession();
+            else startSession();
+        }));
+
+        lines.add(new DisplayLine("Mode: " + formatMode(cfg.displayMode), ACTION_COLOR, () -> {
+            cfg.displayMode = cfg.displayMode == SkywaveConfig.DisplayMode.TOTAL
+                    ? SkywaveConfig.DisplayMode.SESSION
+                    : SkywaveConfig.DisplayMode.TOTAL;
+            SkywaveConfig.save();
+        }));
+
+        lines.add(new DisplayLine("Reset Tracker", ACTION_COLOR, () -> reset(cfg.displayMode)));
+
+        if (cfg.showTimer) {
+            String timerLabel = trackerState.isTimerPaused() ? "Resume" : "Pause";
+            String text = "Timer: " + getSessionUptimeFormatted() + " (" + timerLabel + ")";
+            lines.add(new DisplayLine(text, ACTION_COLOR, this::toggleTimerPause));
+        }
+
+        Map<String, Long> counts = trackerState.getCounts(cfg.displayMode);
 
         double totalCoins = 0.0;
-        List<String> lines = new ArrayList<>();
-        if (counts.isEmpty()) lines.add("No shards yet");
-        else {
-            for (Map.Entry<String, Long> e : counts.entrySet()) {
+        boolean hasAnyPrice = false;
+        if (counts.isEmpty()) {
+            lines.add(new DisplayLine("No shards yet", MUTED_COLOR, null));
+        } else {
+            Map<String, Long> sorted = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+            sorted.putAll(counts);
+            for (Map.Entry<String, Long> e : sorted.entrySet()) {
                 String item = e.getKey();
                 long cnt = e.getValue();
                 double unit = priceFetcher.getPriceFor(item);
-                double sum = unit * cnt;
-                totalCoins += sum;
-                String unitStr = unit > 0 ? String.format("%.2f", unit) : "??";
-                String sumStr = unit > 0 ? String.format("%.2f", sum) : "??";
-                lines.add(item + ": " + cnt + " × " + unitStr + " = " + sumStr);
+                boolean hasPrice = unit > 0;
+                if (hasPrice) {
+                    hasAnyPrice = true;
+                    totalCoins += unit * cnt;
+                }
+                String unitStr = hasPrice ? formatCoins(unit) : "??";
+                String sumStr = hasPrice ? formatCoins(unit * cnt) : "??";
+                lines.add(new DisplayLine(item + ": " + cnt + " × " + unitStr + " = " + sumStr, VALUE_COLOR, null));
             }
         }
 
-        TextRenderer tr = MinecraftClient.getInstance().textRenderer;
-        ctx.fill(x - 4, y - 4, x + hudW, y + hudH, 0x66000000);
+        String totalLine = "Total: " + (hasAnyPrice ? formatCoins(totalCoins) : "??");
+        lines.add(new DisplayLine(totalLine, VALUE_COLOR, null));
 
-        int ly = y + 36;
-        for (String L : lines) {
-            ctx.drawText(tr, Text.literal(L), x + 6, ly, 0xFFFFAA, false);
-            ly += 10;
-        }
-        ctx.drawText(tr, Text.literal("Total: " + String.format("%.2f", totalCoins)), x + 6, ly, 0xFFEE99, false);
+        double hours = getSessionHoursElapsed();
+        double coinsPerHour = hours > 0 ? totalCoins / hours : 0.0;
+        lines.add(new DisplayLine("Coins/hour: " + formatCoins(coinsPerHour), MUTED_COLOR, null));
+
+        return lines;
     }
 
-    private void drawHudWithDragging(DrawContext ctx, SkywaveConfig.HuntingConfig cfg, MinecraftClient client) {
-        // рисуем HUD и обрабатываем dragging
-        drawHudOnly(ctx, cfg);
+    private String formatMode(SkywaveConfig.DisplayMode mode) {
+        return mode == SkywaveConfig.DisplayMode.TOTAL ? "Total" : "Session";
+    }
 
+    private String formatCoins(double value) {
+        return String.format("%,.2f", value);
+    }
+
+    private void handleClicks(MinecraftClient client) {
         long window = client.getWindow().getHandle();
-        double[] mx = new double[1], my = new double[1];
+        double[] mx = new double[1];
+        double[] my = new double[1];
         GLFW.glfwGetCursorPos(window, mx, my);
-        int mouseX = (int) mx[0];
-        int mouseY = (int) my[0];
+        double scale = client.getWindow().getScaleFactor();
+        int mouseX = (int) (mx[0] / scale);
+        int mouseY = (int) (my[0] / scale);
 
         boolean leftDown = GLFW.glfwGetMouseButton(window, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
-
-        int width = 140;
-        int height = cfg.showTimer ? 38 : 28;
-
-        if (leftDown && !dragging) {
-            if (mouseX >= cfg.hudX && mouseX <= cfg.hudX + width &&
-                    mouseY >= cfg.hudY && mouseY <= cfg.hudY + height) {
-                dragging = true;
-                dragOffsetX = mouseX - cfg.hudX;
-                dragOffsetY = mouseY - cfg.hudY;
+        if (leftDown && !lastLeftWasDown) {
+            for (ClickableRegion region : clickRegions) {
+                if (region.contains(mouseX, mouseY)) {
+                    region.onClick.run();
+                    break;
+                }
             }
         }
+        lastLeftWasDown = leftDown;
+    }
 
-        if (!leftDown) dragging = false;
+    public void enableMoveMode() {
+        moveMode = true;
+    }
 
-        if (dragging) {
-            cfg.hudX = mouseX - dragOffsetX;
-            cfg.hudY = mouseY - dragOffsetY;
+    public void disableMoveMode() {
+        moveMode = false;
+        SkywaveConfig.save();
+    }
+
+    public HudBounds getHudBounds() {
+        return lastHudBounds;
+    }
+
+    public void setHudPosition(int x, int y) {
+        SkywaveConfig.get().hunting.hudX = x;
+        SkywaveConfig.get().hunting.hudY = y;
+        SkywaveConfig.save();
+    }
+
+    public void clientTick() {
+        // reserved for future use
+    }
+
+    private record DisplayLine(String text, int color, Runnable onClick) {}
+
+    private record ClickableRegion(int x, int y, int width, int height, Runnable onClick) {
+        boolean contains(int mx, int my) {
+            return mx >= x && mx <= x + width && my >= y && my <= y + height;
         }
     }
 
-    public void enableMoveMode() { moveMode = true; }
-
-    public void disableMoveMode() { moveMode = false; dragging = false; SkywaveConfig.save(); }
-
-    public void clientTick() {
-        // можно оставить пустым — все dragging теперь через onHudRender
+    public record HudBounds(int x, int y, int width, int height) {
+        public boolean contains(int mx, int my) {
+            return mx >= x && mx <= x + width && my >= y && my <= y + height;
+        }
     }
 
-    // ==================== BazaarPriceFetcher ====================
+    private static class HuntingStorage implements ItemTrackerStorage {
+        @Override
+        public Map<String, Long> getTotalCounts() {
+            return SkywaveConfig.get().hunting.huntingTotals;
+        }
+
+        @Override
+        public void incrementTotal(String name, long delta) {
+            SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
+            if (cfg == null) return;
+            cfg.totalShards += delta;
+            long prev = cfg.huntingTotals.getOrDefault(name, 0L);
+            cfg.huntingTotals.put(name, prev + delta);
+        }
+
+        @Override
+        public void resetTotals() {
+            SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
+            if (cfg == null) return;
+            cfg.totalShards = 0L;
+            cfg.huntingTotals.clear();
+        }
+
+        @Override
+        public void save() {
+            SkywaveConfig.save();
+        }
+    }
+
     private class BazaarPriceFetcher {
         private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
         private final ConcurrentHashMap<String, Double> priceCache = new ConcurrentHashMap<>();
         private final ConcurrentHashMap<String, Long> cacheTime = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Double> auctionPriceCache = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Long> auctionCacheTime = new ConcurrentHashMap<>();
         private final ConcurrentHashMap<String, String> nameToProductId = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, String> normalizedNameToId = new ConcurrentHashMap<>();
         private long itemsIndexFetchedAt = 0L;
 
         private final long PRICE_TTL_MS = TimeUnit.MINUTES.toMillis(Math.max(1, SkywaveConfig.get().bazaarRefreshMinutes));
+        private final long AUCTION_TTL_MS = TimeUnit.MINUTES.toMillis(10);
         private final long ITEMS_TTL_MS = TimeUnit.HOURS.toMillis(4);
 
         public double getPriceFor(String displayName) {
@@ -357,58 +450,185 @@ public class HuntingProfitTracker {
             String key = displayName.trim();
             Long t = cacheTime.get(key);
             if (t != null && (System.currentTimeMillis() - t) < PRICE_TTL_MS) {
-                return priceCache.getOrDefault(key, 0.0);
+                double cached = priceCache.getOrDefault(key, 0.0);
+                if (cached > 0) return cached;
+            }
+            Long auctionTime = auctionCacheTime.get(key);
+            if (auctionTime != null && (System.currentTimeMillis() - auctionTime) < AUCTION_TTL_MS) {
+                return auctionPriceCache.getOrDefault(key, 0.0);
             }
             scheduler.execute(() -> fetchPriceFor(key));
-            return priceCache.getOrDefault(key, 0.0);
+            double fallback = priceCache.getOrDefault(key, 0.0);
+            if (fallback > 0) return fallback;
+            return auctionPriceCache.getOrDefault(key, 0.0);
         }
 
         public void refreshAll() {
             try {
                 buildItemsIndexIfNeeded(true);
                 fetchBazaarAll();
-            } catch (Throwable t) { t.printStackTrace(); }
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
         }
 
         private void fetchPriceFor(String displayName) {
             try {
                 buildItemsIndexIfNeeded(false);
                 String pid = findProductIdFor(displayName);
-                if (pid == null) { cacheTime.put(displayName, System.currentTimeMillis()); priceCache.put(displayName, 0.0); return; }
+                if (pid == null) {
+                    cacheTime.put(displayName, System.currentTimeMillis());
+                    priceCache.put(displayName, 0.0);
+                    return;
+                }
                 String apiKey = SkywaveConfig.get().hypixelApiKey;
-                if (apiKey == null || apiKey.isEmpty()) { cacheTime.put(displayName, System.currentTimeMillis()); priceCache.put(displayName, 0.0); return; }
-                String url = "https://api.hypixel.net/skyblock/bazaar?key=" + apiKey;
+                if (apiKey == null || apiKey.isEmpty()) {
+                    cacheTime.put(displayName, System.currentTimeMillis());
+                    priceCache.put(displayName, 0.0);
+                    return;
+                }
+                String url = "https://api.hypixel.net/v2/skyblock/bazaar?key=" + apiKey;
                 HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().timeout(Duration.ofSeconds(10)).build();
                 HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-                if (resp.statusCode() != 200) { cacheTime.put(displayName, System.currentTimeMillis()); priceCache.put(displayName, 0.0); return; }
+                if (resp.statusCode() != 200) {
+                    cacheTime.put(displayName, System.currentTimeMillis());
+                    priceCache.put(displayName, 0.0);
+                    return;
+                }
                 JsonObject root = JsonParser.parseString(resp.body()).getAsJsonObject();
-                if (!root.has("products")) { cacheTime.put(displayName, System.currentTimeMillis()); priceCache.put(displayName, 0.0); return; }
+                if (!root.has("products")) {
+                    cacheTime.put(displayName, System.currentTimeMillis());
+                    priceCache.put(displayName, 0.0);
+                    return;
+                }
                 JsonObject products = root.getAsJsonObject("products");
-                if (!products.has(pid)) { cacheTime.put(displayName, System.currentTimeMillis()); priceCache.put(displayName, 0.0); return; }
+                if (!products.has(pid)) {
+                    cacheTime.put(displayName, System.currentTimeMillis());
+                    priceCache.put(displayName, 0.0);
+                    return;
+                }
                 JsonObject prod = products.getAsJsonObject(pid);
                 double price = extractPriceFromProduct(prod);
                 priceCache.put(displayName, price);
                 cacheTime.put(displayName, System.currentTimeMillis());
-            } catch (IOException | InterruptedException e) { e.printStackTrace(); }
-            catch (Throwable t) { t.printStackTrace(); }
+                if (price <= 0) {
+                    fetchAuctionPriceFor(displayName);
+                }
+            } catch (IOException | InterruptedException e) {
+                e.printStackTrace();
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
         }
 
         private void fetchBazaarAll() {
-            // оставляем как есть
+            String apiKey = SkywaveConfig.get().hypixelApiKey;
+            if (apiKey == null || apiKey.isEmpty()) return;
+            try {
+                String url = "https://api.hypixel.net/v2/skyblock/bazaar?key=" + apiKey;
+                HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().timeout(Duration.ofSeconds(12)).build();
+                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() != 200) return;
+                JsonObject root = JsonParser.parseString(resp.body()).getAsJsonObject();
+                if (!root.has("products")) return;
+                JsonObject products = root.getAsJsonObject("products");
+                for (String key : products.keySet()) {
+                    JsonObject prod = products.getAsJsonObject(key);
+                    double price = extractPriceFromProduct(prod);
+                    String display = nameToProductId.entrySet().stream()
+                            .filter(e -> Objects.equals(e.getValue(), key))
+                            .map(Map.Entry::getKey)
+                            .findFirst()
+                            .orElse(key);
+                    priceCache.put(display, price);
+                    cacheTime.put(display, System.currentTimeMillis());
+                }
+            } catch (IOException | InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        private void fetchAuctionPriceFor(String displayName) {
+            String apiKey = SkywaveConfig.get().hypixelApiKey;
+            if (apiKey == null || apiKey.isEmpty()) return;
+            try {
+                String url = "https://api.hypixel.net/v2/skyblock/auctions?key=" + apiKey + "&page=0";
+                HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().timeout(Duration.ofSeconds(12)).build();
+                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() != 200) return;
+                JsonObject root = JsonParser.parseString(resp.body()).getAsJsonObject();
+                if (!root.has("auctions")) return;
+                double lowest = 0.0;
+                for (var elem : root.getAsJsonArray("auctions")) {
+                    JsonObject auction = elem.getAsJsonObject();
+                    if (!auction.has("bin") || !auction.get("bin").getAsBoolean()) continue;
+                    if (!auction.has("item_name") || !auction.has("starting_bid")) continue;
+                    String name = auction.get("item_name").getAsString();
+                    if (!name.equalsIgnoreCase(displayName)) continue;
+                    double bid = auction.get("starting_bid").getAsDouble();
+                    if (lowest <= 0 || bid < lowest) lowest = bid;
+                }
+                auctionPriceCache.put(displayName, lowest);
+                auctionCacheTime.put(displayName, System.currentTimeMillis());
+            } catch (IOException | InterruptedException e) {
+                e.printStackTrace();
+            }
         }
 
         private double extractPriceFromProduct(JsonObject prod) {
-            // оставляем как есть
+            if (prod == null) return 0.0;
+            if (!prod.has("quick_status")) return 0.0;
+            JsonObject status = prod.getAsJsonObject("quick_status");
+            if (status.has("sellPrice")) {
+                return Math.max(0.0, status.get("sellPrice").getAsDouble());
+            }
+            if (status.has("buyPrice")) {
+                return Math.max(0.0, status.get("buyPrice").getAsDouble());
+            }
             return 0.0;
         }
 
         private void buildItemsIndexIfNeeded(boolean force) {
-            // оставляем как есть
+            long now = System.currentTimeMillis();
+            if (!force && (now - itemsIndexFetchedAt) < ITEMS_TTL_MS && !nameToProductId.isEmpty()) return;
+            String apiKey = SkywaveConfig.get().hypixelApiKey;
+            if (apiKey == null || apiKey.isEmpty()) return;
+            try {
+                String url = "https://api.hypixel.net/v2/resources/skyblock/items?key=" + apiKey;
+                HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().timeout(Duration.ofSeconds(10)).build();
+                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() != 200) return;
+                JsonObject root = JsonParser.parseString(resp.body()).getAsJsonObject();
+                if (!root.has("items")) return;
+                JsonArray items = root.getAsJsonArray("items");
+                nameToProductId.clear();
+                normalizedNameToId.clear();
+                for (int i = 0; i < items.size(); i++) {
+                    JsonObject obj = items.get(i).getAsJsonObject();
+                    if (!obj.has("id") || !obj.has("name")) continue;
+                    String id = obj.get("id").getAsString();
+                    String name = obj.get("name").getAsString();
+                    nameToProductId.put(name, id);
+                    normalizedNameToId.put(normalizeLookup(name), id);
+                }
+                itemsIndexFetchedAt = now;
+            } catch (IOException | InterruptedException e) {
+                e.printStackTrace();
+            }
         }
 
         private String findProductIdFor(String displayName) {
-            // оставляем как есть
+            if (displayName == null) return null;
+            String direct = nameToProductId.get(displayName);
+            if (direct != null) return direct;
+            String normalized = normalizeLookup(displayName);
+            String mapped = normalizedNameToId.get(normalized);
+            if (mapped != null) return mapped;
             return null;
+        }
+
+        private String normalizeLookup(String name) {
+            return name.toLowerCase().replaceAll("[^a-z0-9]", "");
         }
     }
 }
