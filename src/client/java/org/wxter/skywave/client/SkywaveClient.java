@@ -20,6 +20,7 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.lit
 public class SkywaveClient implements ClientModInitializer {
 
     private static volatile boolean openGuiNextTick = false;
+    private static volatile boolean openHudMoveNextTick = false;
 
     @Override
     public void onInitializeClient() {
@@ -45,6 +46,15 @@ public class SkywaveClient implements ClientModInitializer {
                     ModConstants.LOGGER.warn("Queued GUI open requested but client/player was null");
                 }
             }
+            if (openHudMoveNextTick) {
+                openHudMoveNextTick = false;
+                if (client != null && client.player != null) {
+                    HuntingProfitTracker.INSTANCE.enableMoveMode();
+                    client.setScreen(new SkywaveHudMoveScreen(client.currentScreen));
+                } else {
+                    ModConstants.LOGGER.warn("Queued HUD move GUI open requested but client/player was null");
+                }
+            }
             // other tick tasks if needed
         });
 
@@ -56,8 +66,7 @@ public class SkywaveClient implements ClientModInitializer {
                         return 1;
                     })
                     .then(literal("gui").executes(ctx -> {
-                        MinecraftClient mc = MinecraftClient.getInstance();
-                        mc.execute(() -> mc.setScreen(new SkywaveHudMoveScreen(mc.currentScreen)));
+                        openHudMoveNextTick = true;
                         return 1;
                     }))
             );
@@ -68,8 +77,7 @@ public class SkywaveClient implements ClientModInitializer {
                         return 1;
                     })
                     .then(literal("gui").executes(ctx -> {
-                        MinecraftClient mc = MinecraftClient.getInstance();
-                        mc.execute(() -> mc.setScreen(new SkywaveHudMoveScreen(mc.currentScreen)));
+                        openHudMoveNextTick = true;
                         return 1;
                     }))
             );
