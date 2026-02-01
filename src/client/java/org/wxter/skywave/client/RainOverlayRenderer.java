@@ -13,7 +13,7 @@ public final class RainOverlayRenderer {
     private static final int TOP_OFFSET = 80;
     private static final int DEFAULT_TICKS = 240;
 
-    // Сделали public для регистрации в HudRenderCallback
+    // public для регистрации в HudRenderCallback
     public static void render(DrawContext ctx, RenderTickCounter tickDelta) {
         if (message == null || remainingTicks <= 0) return;
 
@@ -30,7 +30,7 @@ public final class RainOverlayRenderer {
         float scale = 2.0f; // увеличение в 2 раза
         ctx.getMatrices().scale(scale, scale);
 
-        // при масштабировании координаты нужно делить на scale
+        // деление координат на scale при масштабировании
         int scaledX = screenW / 2 / (int)scale;
         int scaledY = y / (int)scale;
 
