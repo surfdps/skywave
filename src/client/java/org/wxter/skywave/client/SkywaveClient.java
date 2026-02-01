@@ -52,26 +52,24 @@ public class SkywaveClient implements ClientModInitializer {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
             dispatcher.register(literal("skywave")
                     .executes(ctx -> {
-                        MinecraftClient mc = MinecraftClient.getInstance();
-                        mc.setScreen(new SkywaveMainScreen(mc.currentScreen));
+                        openGuiNextTick = true;
                         return 1;
                     })
                     .then(literal("gui").executes(ctx -> {
                         MinecraftClient mc = MinecraftClient.getInstance();
-                        mc.setScreen(new SkywaveHudMoveScreen(MinecraftClient.getInstance().currentScreen));
+                        mc.execute(() -> mc.setScreen(new SkywaveHudMoveScreen(mc.currentScreen)));
                         return 1;
                     }))
             );
 
             dispatcher.register(literal("sw")
                     .executes(ctx -> {
-                        MinecraftClient mc = MinecraftClient.getInstance();
-                        mc.setScreen(new SkywaveMainScreen(mc.currentScreen));
+                        openGuiNextTick = true;
                         return 1;
                     })
                     .then(literal("gui").executes(ctx -> {
                         MinecraftClient mc = MinecraftClient.getInstance();
-                        mc.setScreen(new SkywaveHudMoveScreen(MinecraftClient.getInstance().currentScreen));
+                        mc.execute(() -> mc.setScreen(new SkywaveHudMoveScreen(mc.currentScreen)));
                         return 1;
                     }))
             );
