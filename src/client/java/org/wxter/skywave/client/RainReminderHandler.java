@@ -36,7 +36,7 @@ public class RainReminderHandler {
                 client.getSoundManager().play(
                         PositionedSoundInstance.master(
                                 SoundEvents.BLOCK_NOTE_BLOCK_IRON_XYLOPHONE,
-                                0f
+                                1f
                         )
                 );
             }

@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
@@ -79,6 +80,14 @@ public class HuntingProfitTracker {
         HudRenderCallback.EVENT.register((drawContext, tick) -> {
             try {
                 onHudRender(drawContext);
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
+        });
+
+        ScreenEvents.AFTER_RENDER.register((screen, drawContext, mouseX, mouseY, tickDelta) -> {
+            try {
+                onScreenRender(drawContext);
             } catch (Throwable t) {
                 t.printStackTrace();
             }
@@ -202,6 +211,7 @@ public class HuntingProfitTracker {
     private void recordShard(String rawName, int count) {
         if (rawName == null || rawName.isEmpty()) rawName = "Shard";
         String name = normalizeName(rawName);
+        if (name.isEmpty()) name = "Shard";
         trackerState.recordItem(name, count);
     }
 
@@ -244,7 +254,20 @@ public class HuntingProfitTracker {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null) return;
 
-        boolean allowClicks = !moveMode && client.currentScreen == null;
+        if (client.currentScreen != null) return;
+        boolean allowClicks = !moveMode;
+        drawHud(ctx, cfg, client, allowClicks);
+    }
+
+    private void onScreenRender(DrawContext ctx) {
+        SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
+        if (cfg == null || !cfg.profitTrackerEnabled) return;
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null) return;
+        if (client.currentScreen == null) return;
+
+        boolean allowClicks = !moveMode;
         drawHud(ctx, cfg, client, allowClicks);
     }
 

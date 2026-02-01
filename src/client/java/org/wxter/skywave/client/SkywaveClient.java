@@ -5,6 +5,7 @@ import net.fabricmc.api.ClientModInitializer;
 import org.wxter.skywave.client.tracker.HuntingProfitTracker;
 import org.wxter.skywave.client.gui.SkywaveHudMoveScreen;
 import org.wxter.skywave.client.gui.SkywaveMainScreen;
+import org.wxter.skywave.client.RainReminderHandler;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
@@ -51,6 +52,9 @@ public class SkywaveClient implements ClientModInitializer {
                 } else {
                     ModConstants.LOGGER.warn("Queued HUD move GUI open requested but client/player was null");
                 }
+            }
+            if (client != null) {
+                RainReminderHandler.tick(client);
             }
             // other tick tasks if needed
         });
