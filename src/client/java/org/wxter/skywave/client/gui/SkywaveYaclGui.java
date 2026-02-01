@@ -10,6 +10,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.text.Text;
 import org.wxter.skywave.config.SkywaveConfig;
+import org.wxter.skywave.client.tracker.HuntingProfitTracker;
 
 import java.awt.Color;
 import java.util.List;
@@ -21,7 +22,8 @@ public class SkywaveYaclGui {
     public static Screen create(Screen parent) {
         return YetAnotherConfigLib.createBuilder()
                 .title(Text.literal("Skywave Settings"))
-                // Category
+
+                // Fishing Category
                 .category(ConfigCategory.createBuilder()
                         .name(Text.literal("Fishing"))
                         // ----- Rain Reminder group (header + options) -----
@@ -72,55 +74,114 @@ public class SkywaveYaclGui {
                                         .build())
 
                                 .build()) // end Rain Reminder group
+                        .build()) // end category
 
-                        // ----- Mob Highlight group (separated visually) -----
+                // QOL Category
+                .category(ConfigCategory.createBuilder()
+                        .name(Text.literal("Quality of Life"))
+                    // ----- Mob Highlight group (separated visually) -----
+                    .group(OptionGroup.createBuilder()
+                            .name(Text.literal("Mobs Highlight"))
+                            .option(Option.<Boolean>createBuilder()
+                                    .name(Text.literal("Enable Mobs Highlight"))
+                                    .description(OptionDescription.of(Text.literal(
+                                            "Highlight mobs by nametag with a glow. Works with custom names, scoreboard team names, and Hypixel-style armor stand name tags."
+                                    )))
+                                    .binding(
+                                            true,
+                                            () -> SkywaveConfig.get().mobHighlightEnabled,
+                                            v -> SkywaveConfig.get().mobHighlightEnabled = v
+                                    )
+                                    .controller(TickBoxControllerBuilder::create)
+                                    .build())
+
+                            .option(Option.<java.awt.Color>createBuilder()
+                                    .name(Text.literal("Highlight color"))
+                                    .description(OptionDescription.of(Text.literal(
+                                            "Color used for the mob outline glow."
+                                    )))
+                                    .binding(
+                                            new Color(SkywaveConfig.get().mobHighlightColor, true),
+                                            () -> new Color(SkywaveConfig.get().mobHighlightColor, true),
+                                            (Color c) -> SkywaveConfig.get().mobHighlightColor = c.getRGB()
+                                    )
+                                    .controller(ColorControllerBuilder::create)
+                                    .build())
+
+                            .build()) // end Mob Highlight group
+
+                    // ListOption must be added directly to category (not inside a group)
+                    .option(ListOption.<String>createBuilder()
+                            .name(Text.literal("Nametags to Highlight"))
+                            .description(OptionDescription.of(Text.literal(
+                                    "Add nametags to highlight (e.g. Night Squid, Golden Goblin). Matches the visible name from any source (entity, team, or armor stand above mob). Doesn`t work through walls."
+                            )))
+                            .binding(
+                                    new ArrayList<>(List.of("Night Squid")),
+                                    () -> new ArrayList<>(SkywaveConfig.get().mobHighlightNametags),
+                                    list -> SkywaveConfig.get().mobHighlightNametags = new ArrayList<>(list)
+                            )
+                            .controller(StringControllerBuilder::create)
+                            .initial("")
+                            .build())
+                        .build())
+
+                // Hunting Category
+                .category(ConfigCategory.createBuilder()
+                        .name(Text.literal("Hunting"))
                         .group(OptionGroup.createBuilder()
-                                .name(Text.literal("Mobs Highlight"))
+                                .name(Text.literal("Profit Tracker"))
                                 .option(Option.<Boolean>createBuilder()
-                                        .name(Text.literal("Enable mob highlight"))
-                                        .description(OptionDescription.of(Text.literal(
-                                                "Highlight mobs by nametag with a glow. Works with custom names, scoreboard team names, and Hypixel-style armor stand name tags."
-                                        )))
+                                        .name(Text.literal("Hunting Profit Tracker"))
+                                        .description(OptionDescription.of(Text.literal("Track profit from shards via hunting.\n\nOnly tracks shards, no other items!")))
                                         .binding(
                                                 true,
-                                                () -> SkywaveConfig.get().mobHighlightEnabled,
-                                                v -> SkywaveConfig.get().mobHighlightEnabled = v
+                                                () -> SkywaveConfig.get().hunting.profitTrackerEnabled,
+                                                v -> SkywaveConfig.get().hunting.profitTrackerEnabled = v
                                         )
                                         .controller(TickBoxControllerBuilder::create)
                                         .build())
 
-                                .option(Option.<java.awt.Color>createBuilder()
-                                        .name(Text.literal("Highlight color"))
-                                        .description(OptionDescription.of(Text.literal(
-                                                "Color used for the mob outline glow."
-                                        )))
+                                .option(Option.<Boolean>createBuilder()
+                                        .name(Text.literal("Start Counting (Start/Stop)"))
+                                        .description(OptionDescription.of(Text.literal("Toggle shards counting.\n\nAlso clickable on HUD)")))
                                         .binding(
-                                                new Color(SkywaveConfig.get().mobHighlightColor, true),
-                                                () -> new Color(SkywaveConfig.get().mobHighlightColor, true),
-                                                (Color c) -> SkywaveConfig.get().mobHighlightColor = c.getRGB()
+                                                false,
+                                                HuntingProfitTracker.INSTANCE::isRunning,
+                                                (Boolean v) -> {
+                                                    if (v) HuntingProfitTracker.INSTANCE.startSession();
+                                                    else HuntingProfitTracker.INSTANCE.stopSession();
+                                                }
                                         )
-                                        .controller(ColorControllerBuilder::create)
+                                        .controller(TickBoxControllerBuilder::create)
                                         .build())
 
-                                .build()) // end Mob Highlight group
+                                .option(Option.<SkywaveConfig.DisplayMode>createBuilder()
+                                        .name(Text.literal("Display Mode"))
+                                        .description(OptionDescription.of(Text.literal("Choose whether HUD shows Total or Session shards profit.")))
+                                        .binding(
+                                                SkywaveConfig.get().hunting.displayMode,
+                                                () -> SkywaveConfig.get().hunting.displayMode,
+                                                (SkywaveConfig.DisplayMode m) -> SkywaveConfig.get().hunting.displayMode = m
+                                        )
+                                        .controller(opt -> EnumControllerBuilder.create(opt).enumClass(SkywaveConfig.DisplayMode.class))
+                                        .build())
 
-                        // ListOption must be added directly to category (not inside a group)
-                        .option(ListOption.<String>createBuilder()
-                                .name(Text.literal("Mobs to highlight (by nametag)"))
-                                .description(OptionDescription.of(Text.literal(
-                                        "Add nametags to highlight (e.g. Night Squid, Golden Goblin). Matches the visible name from any source (entity, team, or armor stand above mob)."
-                                )))
-                                .binding(
-                                        new ArrayList<>(List.of("Night Squid")),
-                                        () -> new ArrayList<>(SkywaveConfig.get().mobHighlightNametags),
-                                        list -> SkywaveConfig.get().mobHighlightNametags = new ArrayList<>(list)
-                                )
-                                .controller(StringControllerBuilder::create)
-                                .initial("")
+                                .option(Option.<Boolean>createBuilder()
+                                        .name(Text.literal("Show Timer"))
+                                        .description(OptionDescription.of(Text.literal("Show session timer on the tracker HUD.")))
+                                        .binding(
+                                                true,
+                                                () -> SkywaveConfig.get().hunting.showTimer,
+                                                v -> SkywaveConfig.get().hunting.showTimer = v
+                                        )
+                                        .controller(TickBoxControllerBuilder::create)
+                                        .build())
+
                                 .build())
+                        .build())
 
-                        .build()) // end category
-                .save(() -> SkywaveConfig.save())
+                .save(SkywaveConfig::save)
                 .build()
                 .generateScreen(parent);
     }

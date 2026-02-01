@@ -1,6 +1,7 @@
 package org.wxter.skywave.client;
 
 import net.fabricmc.api.ClientModInitializer;
+import org.wxter.skywave.client.tracker.HuntingProfitTracker;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
@@ -19,7 +20,7 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.*;
 public class SkywaveClient implements ClientModInitializer {
 
     private static KeyBinding openGuiKey;
-    // Флаг: открыть GUI в следующем тике клиента (ставится в обработчике команды)
+    // Флаг: открыть GUI в следующем тике клиента
     private static volatile boolean openGuiNextTick = false;
 
     @Override
@@ -29,9 +30,11 @@ public class SkywaveClient implements ClientModInitializer {
 
         HudRenderCallback.EVENT.register(RainOverlayRenderer::render);
 
+        HuntingProfitTracker.INSTANCE.init();
+
         // Регистрация логики тика (включая queued-open)
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            // Обработка queued команды на открытие GUI (если нужно)
+            // Обработка queued команды на открытие GUI
             if (openGuiNextTick) {
                 openGuiNextTick = false; // сбросим флаг сразу
                 if (client != null && client.player != null) {

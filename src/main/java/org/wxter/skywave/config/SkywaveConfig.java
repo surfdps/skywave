@@ -19,6 +19,12 @@ public class SkywaveConfig {
         ONSCREEN   // отображать крупным текстом сверху
     }
 
+    /** Display mode for various trackers (Total = persistent total, Session = current run only). */
+    public enum DisplayMode {
+        TOTAL,
+        SESSION
+    }
+
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("skywave.json");
 
@@ -39,6 +45,51 @@ public class SkywaveConfig {
     /** ARGB (int) — highlight outline color (default: deep sky blue 0xFF00BFFF). */
     public int mobHighlightColor = 0xFF00BFFF;
     // ======================
+
+    // ===== HUNTING PROFIT TRACKER CONFIG =====
+    public HuntingConfig hunting = new HuntingConfig();
+
+    public static class HuntingConfig {
+        /** Enable the Hunting Profit Tracker (HUD + parsing). */
+        public boolean profitTrackerEnabled = false;
+
+        /** Show session timer on HUD. */
+        public boolean showTimer = true;
+
+        /** Which value HUD shows by default (Total: persistent, Session: current counting session). */
+        public DisplayMode displayMode = DisplayMode.SESSION;
+
+        /**
+         * List of regex patterns (Java regex) used to parse chat messages and extract shard counts.
+         * These are user-editable — Hypixel strings sometimes change, so tweak them if needed.
+         * Capture group 1 should contain the numeric count when possible.
+         */
+        public List<String> chatPatterns = new ArrayList<>(List.of(
+                // flexible defaults — adjust to exact Hypixel chat lines if necessary
+                // Generic shard gain
+                "(?:You found|You received|You obtained|You got) .*Shard.* x?(\\d+)",
+
+                // Loot Share assist message
+                "LOOT SHARE You received (\\d+) .+? Shards",
+                "LOOT SHARE You received (\\d+) .+? Shard",
+
+                // Basic shard message
+                "You caught x?(\\d+) .+? Shards",
+                "You caught ?(\\d+) .+? Shard",
+
+                // Fallback generic
+                "(.+Shard.+) x?(\\d+)",
+                "Picked up (\\d+)x? (?:.*Shard.*)"
+        ));
+
+        /** HUD position (pixels, scaled screen coords). */
+        public int hudX = 8;
+        public int hudY = 40;
+
+        /** Persistent total of shards (saved in the config file). */
+        public long totalShards = 0L;
+    }
+    // ==========================================
 
     public static SkywaveConfig get() {
         if (INSTANCE == null) load();
