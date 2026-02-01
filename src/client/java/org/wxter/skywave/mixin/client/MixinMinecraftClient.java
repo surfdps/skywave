@@ -3,7 +3,6 @@ package org.wxter.skywave.mixin.client;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.passive.SquidEntity;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -13,6 +12,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.wxter.skywave.client.EntityHighlightHelper;
 import org.wxter.skywave.config.SkywaveConfig;
 
 import java.util.HashMap;
@@ -35,13 +35,8 @@ public class MixinMinecraftClient {
     }
 
     @Inject(method = "hasOutline", at = @At("HEAD"), cancellable = true)
-    private void skywave$nightSquidOutline(Entity entity, CallbackInfoReturnable<Boolean> cir) {
-
-        if (!SkywaveConfig.get().nightSquidHighlight) return;
-        if (!(entity instanceof SquidEntity squid)) return;
-
-        String name = squid.getName().getString();
-        if (!name.contains("Night Squid")) return;
+    private void skywave$mobHighlightOutline(Entity entity, CallbackInfoReturnable<Boolean> cir) {
+        if (!EntityHighlightHelper.matchesNametags(entity)) return;
 
         Boolean cached = skywave$visibilityCache.get(entity.getUuid());
         if (cached != null) {

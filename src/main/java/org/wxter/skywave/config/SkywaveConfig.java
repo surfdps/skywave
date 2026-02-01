@@ -9,6 +9,8 @@ import java.io.Reader;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 public class SkywaveConfig {
 
@@ -28,11 +30,14 @@ public class SkywaveConfig {
 
     public RainReminderType rainReminderType = RainReminderType.CHAT;
 
-    public boolean nightSquidHighlight = true;
+    /** Enable mob highlight by nametag (works with custom names, scoreboard team names, and Hypixel-style armor stand name tags). */
+    public boolean mobHighlightEnabled = true;
 
-    // ARGB (int) — по умолчанию голубой с полной прозрачностью (0xFF00BFFF)
-    // Сохраняется в JSON как число.
-    public int nightSquidColor = 0xFF00BFFF;
+    /** Nametags to highlight (e.g. "Night Squid", "Golden Goblin"). Matches entity display name from any source. */
+    public List<String> mobHighlightNametags = new ArrayList<>(List.of("Night Squid"));
+
+    /** ARGB (int) — highlight outline color (default: deep sky blue 0xFF00BFFF). */
+    public int mobHighlightColor = 0xFF00BFFF;
     // ======================
 
     public static SkywaveConfig get() {

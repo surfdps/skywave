@@ -3,13 +3,16 @@ package org.wxter.skywave.client.gui;
 import dev.isxander.yacl3.api.*;
 import dev.isxander.yacl3.api.controller.ColorControllerBuilder;
 import dev.isxander.yacl3.api.controller.EnumControllerBuilder;
+import dev.isxander.yacl3.api.controller.StringControllerBuilder;
 import dev.isxander.yacl3.api.controller.TickBoxControllerBuilder;
+import java.util.ArrayList;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.text.Text;
 import org.wxter.skywave.config.SkywaveConfig;
 
 import java.awt.Color;
+import java.util.List;
 
 public class SkywaveYaclGui {
 
@@ -74,14 +77,14 @@ public class SkywaveYaclGui {
                         .group(OptionGroup.createBuilder()
                                 .name(Text.literal("Mobs Highlight"))
                                 .option(Option.<Boolean>createBuilder()
-                                        .name(Text.literal("Night Squid Highlight"))
+                                        .name(Text.literal("Enable mob highlight"))
                                         .description(OptionDescription.of(Text.literal(
-                                                "Highlights Night Squids with a glow so you can see them easier while fishing."
+                                                "Highlight mobs by nametag with a glow. Works with custom names, scoreboard team names, and Hypixel-style armor stand name tags."
                                         )))
                                         .binding(
                                                 true,
-                                                () -> SkywaveConfig.get().nightSquidHighlight,
-                                                v -> SkywaveConfig.get().nightSquidHighlight = v
+                                                () -> SkywaveConfig.get().mobHighlightEnabled,
+                                                v -> SkywaveConfig.get().mobHighlightEnabled = v
                                         )
                                         .controller(TickBoxControllerBuilder::create)
                                         .build())
@@ -89,17 +92,32 @@ public class SkywaveYaclGui {
                                 .option(Option.<java.awt.Color>createBuilder()
                                         .name(Text.literal("Highlight color"))
                                         .description(OptionDescription.of(Text.literal(
-                                                "Pick the color used for the Night Squid outline."
+                                                "Color used for the mob outline glow."
                                         )))
                                         .binding(
-                                                new Color(SkywaveConfig.get().nightSquidColor, true),
-                                                () -> new Color(SkywaveConfig.get().nightSquidColor, true),
-                                                (Color c) -> SkywaveConfig.get().nightSquidColor = c.getRGB()
+                                                new Color(SkywaveConfig.get().mobHighlightColor, true),
+                                                () -> new Color(SkywaveConfig.get().mobHighlightColor, true),
+                                                (Color c) -> SkywaveConfig.get().mobHighlightColor = c.getRGB()
                                         )
                                         .controller(ColorControllerBuilder::create)
                                         .build())
 
                                 .build()) // end Mob Highlight group
+
+                        // ListOption must be added directly to category (not inside a group)
+                        .option(ListOption.<String>createBuilder()
+                                .name(Text.literal("Mobs to highlight (by nametag)"))
+                                .description(OptionDescription.of(Text.literal(
+                                        "Add nametags to highlight (e.g. Night Squid, Golden Goblin). Matches the visible name from any source (entity, team, or armor stand above mob)."
+                                )))
+                                .binding(
+                                        new ArrayList<>(List.of("Night Squid")),
+                                        () -> new ArrayList<>(SkywaveConfig.get().mobHighlightNametags),
+                                        list -> SkywaveConfig.get().mobHighlightNametags = new ArrayList<>(list)
+                                )
+                                .controller(StringControllerBuilder::create)
+                                .initial("")
+                                .build())
 
                         .build()) // end category
                 .save(() -> SkywaveConfig.save())
