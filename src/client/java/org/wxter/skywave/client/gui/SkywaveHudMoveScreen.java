@@ -2,6 +2,7 @@ package org.wxter.skywave.client.gui;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.text.Text;
@@ -56,8 +57,10 @@ public class SkywaveHudMoveScreen extends Screen {
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == 0) {
+    public boolean mouseClicked(Click click, boolean doubleClick) {
+        double mouseX = click.x();
+        double mouseY = click.y();
+        if (click.button() == 0) {
             HuntingProfitTracker.HudBounds huntingBounds = HuntingProfitTracker.INSTANCE.getHudBounds();
             if (huntingBounds.contains((int) mouseX, (int) mouseY)) {
                 draggingTarget = DragTarget.HUNTING;
@@ -79,12 +82,14 @@ public class SkywaveHudMoveScreen extends Screen {
                 return true;
             }
         }
-        return super.mouseClicked(mouseX, mouseY, button);
+        return super.mouseClicked(click, doubleClick);
     }
 
     @Override
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
-        if (button == 0 && draggingTarget != null) {
+    public boolean mouseDragged(Click click, double deltaX, double deltaY) {
+        double mouseX = click.x();
+        double mouseY = click.y();
+        if (click.button() == 0 && draggingTarget != null) {
             if (draggingTarget == DragTarget.HUNTING) {
                 HuntingProfitTracker.INSTANCE.setHudPosition((int) mouseX - dragOffsetX, (int) mouseY - dragOffsetY);
                 return true;
@@ -94,15 +99,15 @@ public class SkywaveHudMoveScreen extends Screen {
                 return true;
             }
         }
-        return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
+        return super.mouseDragged(click, deltaX, deltaY);
     }
 
     @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (button == 0) {
+    public boolean mouseReleased(Click click) {
+        if (click.button() == 0) {
             draggingTarget = null;
         }
-        return super.mouseReleased(mouseX, mouseY, button);
+        return super.mouseReleased(click);
     }
 
     private enum DragTarget {

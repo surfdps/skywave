@@ -397,7 +397,7 @@ public class HuntingProfitTracker {
     }
 
     public record HudBounds(int x, int y, int width, int height) {
-        boolean contains(int mx, int my) {
+        public boolean contains(int mx, int my) {
             return mx >= x && mx <= x + width && my >= y && my <= y + height;
         }
     }
