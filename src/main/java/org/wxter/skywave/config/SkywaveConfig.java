@@ -79,10 +79,16 @@ public class SkywaveConfig {
     // ============================
 
     // ===== Hypixel API =====
-    public String hypixelApiKey = "7cbe2e60-cb47-41c8-bee0-90129cbc9150";
+    public String hypixelApiKey = "";
     /** minutes */
     public int bazaarRefreshMinutes = 5;
     // =======================
+
+    // ===== HUD Positions =====
+    /** Centered if negative; absolute screen x position otherwise. */
+    public int rainReminderHudX = -1;
+    public int rainReminderHudY = 80;
+    // =========================
 
     public static SkywaveConfig get() {
         if (INSTANCE == null) load();
