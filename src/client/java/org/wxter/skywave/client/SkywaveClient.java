@@ -33,9 +33,6 @@ public class SkywaveClient implements ClientModInitializer {
         // init tracker (внутри он зарегистрирует слушатель и HUD)
         HuntingProfitTracker.INSTANCE.init();
 
-        //регистрируем lambda, которая вызывает onHudRender
-        HudRenderCallback.EVENT.register((drawContext, tick) -> HuntingProfitTracker.INSTANCE.onHudRender(drawContext));
-
         // tick handler for queued GUI open
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (openGuiNextTick) {
