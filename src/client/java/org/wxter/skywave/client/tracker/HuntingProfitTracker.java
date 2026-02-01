@@ -85,12 +85,14 @@ public class HuntingProfitTracker {
             }
         });
 
-        ScreenEvents.AFTER_RENDER.register((screen, drawContext, mouseX, mouseY, tickDelta) -> {
-            try {
-                onScreenRender(drawContext);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            }
+        ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
+            ScreenEvents.afterRender(screen).register((renderedScreen, drawContext, mouseX, mouseY, tickDelta) -> {
+                try {
+                    onScreenRender(drawContext);
+                } catch (Throwable t) {
+                    t.printStackTrace();
+                }
+            });
         });
     }
 
