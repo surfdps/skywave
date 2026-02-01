@@ -3,6 +3,8 @@ name: Build and Release
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write  # Required for creating releases and uploading assets
@@ -34,12 +36,14 @@ jobs:
 
       - name: Capture version
         id: vars
+        if: github.event_name == 'push'
         run: |
           MOD_VERSION=$(grep '^mod_version=' gradle.properties | cut -d'=' -f2)
           echo "mod_version=$MOD_VERSION" >> $GITHUB_OUTPUT
           echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
       - name: Create Release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.vars.outputs.mod_version }}-${{ steps.vars.outputs.short_sha }}
