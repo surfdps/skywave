@@ -231,14 +231,35 @@ public class HuntingProfitTracker {
     private void recordShard(String rawName, int count) {
         if (rawName == null || rawName.isEmpty()) rawName = "Shard";
         String name = normalizeName(rawName);
-        if (name.isEmpty()) name = "Shard";
+        if (name == null || name.isBlank()) {
+            name = "Unknown Shard";
+        }
         trackerState.recordItem(name, count);
+        System.out.println("[Skywave DEBUG] Recording shard name = '" + name + "'");
     }
 
     private String normalizeName(String s) {
-        if (s == null) return "";
-        // remove trailing "Shard"/"Shards", collapse whitespace and trim
-        return s.replaceAll("(?i)\\s*Shards?\\s*$", "").replaceAll("\\s+", " ").trim();
+        if (s == null) return "Unknown Shard";
+
+        // Remove Minecraft color/format codes just in case
+        s = s.replaceAll("§.", "");
+
+        // Remove trailing "Shard"/"Shards"
+        s = s.replaceAll("(?i)\\s*Shards?\\s*$", "");
+
+        // Remove non-visible / control chars
+        s = s.replaceAll("\\p{C}", "");
+
+        // Remove weird punctuation at ends
+        s = s.replaceAll("^[^A-Za-z0-9]+", "").replaceAll("[^A-Za-z0-9]+$", "");
+
+        // Collapse spaces
+        s = s.replaceAll("\\s+", " ").trim();
+
+        // Absolute safety fallback
+        if (s.isEmpty()) return "Unknown Shard";
+
+        return s;
     }
 
     public synchronized void startSession() {
@@ -359,6 +380,9 @@ public class HuntingProfitTracker {
             for (Map.Entry<String, Long> e : sorted.entrySet()) {
                 String item = e.getKey();
                 long cnt = e.getValue();
+
+                // Skip corrupt entries
+                if (item == null || item.isBlank()) continue;
 
                 if (cfg.showUnitPrices) {
                     double unit = priceFetcher.getPriceFor(item);
