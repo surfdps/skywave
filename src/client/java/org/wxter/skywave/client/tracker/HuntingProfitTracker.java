@@ -147,31 +147,40 @@ public class HuntingProfitTracker {
 
     private ParsedResult parseFromMatcher(Matcher m, String plain) {
         int foundCount = 0;
-        String foundName = null;
+        List<String> nameParts = new ArrayList<>();
+
         for (int i = 1; i <= m.groupCount(); i++) {
             String g = m.group(i);
             if (g == null) continue;
+
+            // if this group contains digits -> treat as count
             String digits = g.replaceAll("[^0-9]", "");
             if (!digits.isEmpty()) {
                 try {
                     foundCount = Integer.parseInt(digits);
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
                 continue;
             }
-            if (foundName == null && g.trim().length() > 0) {
-                String nm = g.replaceAll("\\s*Shards?\\s*$", "").trim();
-                if (!nm.isEmpty()) foundName = nm;
+
+            String trimmed = g.trim();
+            if (!trimmed.isEmpty()) {
+                // remove trailing "Shard"/"Shards" if accidentally captured
+                String nm = trimmed.replaceAll("(?i)\\s*Shards?\\s*$", "").trim();
+                if (!nm.isEmpty()) nameParts.add(nm);
             }
         }
-        if (foundName == null) {
-            int idx = plain.toLowerCase().indexOf("shard");
-            if (idx > 0) {
-                String before = plain.substring(0, idx).trim();
-                String[] parts = before.split("\\s+");
-                if (parts.length > 0) foundName = parts[parts.length - 1].replaceAll("[^\\w\\-']", "");
-            }
+
+        String foundName = null;
+        if (!nameParts.isEmpty()) {
+            // join multiple captured parts (handles "Night" + "Squid" => "Night Squid")
+            foundName = String.join(" ", nameParts).replaceAll("\\s+", " ").trim();
+        } else {
+            // **Important fix:** use the proximity-based parser which returns the full
+            // item phrase (not only the last word).
+            ParsedResult prox = parseByProximity(plain);
+            if (prox != null) foundName = prox.name;
         }
+
         if (foundName == null) return null;
         if (foundCount <= 0) foundCount = 1;
         return new ParsedResult(foundName, foundCount);
@@ -190,8 +199,7 @@ public class HuntingProfitTracker {
             String g = mn.group(1) != null ? mn.group(1) : mn.group(2);
             try {
                 count = Integer.parseInt(g);
-            } catch (Exception ignored) {
-            }
+            } catch (Exception ignored) {}
             before = before.substring(0, mn.start()).trim();
         } else {
             Matcher anyNum = Pattern.compile("(\\d+)").matcher(before);
@@ -207,9 +215,15 @@ public class HuntingProfitTracker {
             }
         }
 
-        String[] parts = before.split("\\s+");
-        String name = parts.length > 0 ? parts[parts.length - 1] : "Shard";
-        name = name.replaceAll("[^\\w\\-']", "").trim();
+        String candidate = before.trim();
+        if (candidate.isEmpty()) return null;
+
+        // Remove common leading verbs so candidate becomes just the item name portion.
+        candidate = candidate.replaceAll("(?i)^(?:you\\s+(?:caught|received|obtained|got)\\s+|picked up\\s+|loot share you received\\s+)", "").trim();
+
+        // Remove stray punctuation and multiple spaces
+        String name = candidate.replaceAll("[^\\w\\- '\\:]", " ").replaceAll("\\s+", " ").trim();
+
         if (name.isEmpty()) name = "Shard";
         return new ParsedResult(name, count);
     }
@@ -222,7 +236,9 @@ public class HuntingProfitTracker {
     }
 
     private String normalizeName(String s) {
-        return s.trim();
+        if (s == null) return "";
+        // remove trailing "Shard"/"Shards", collapse whitespace and trim
+        return s.replaceAll("(?i)\\s*Shards?\\s*$", "").replaceAll("\\s+", " ").trim();
     }
 
     public synchronized void startSession() {
@@ -483,11 +499,13 @@ public class HuntingProfitTracker {
         private final ConcurrentHashMap<String, Long> auctionCacheTime = new ConcurrentHashMap<>();
         private final ConcurrentHashMap<String, String> nameToProductId = new ConcurrentHashMap<>();
         private final ConcurrentHashMap<String, String> normalizedNameToId = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Long> missingIdLogTime = new ConcurrentHashMap<>();
         private long itemsIndexFetchedAt = 0L;
 
         private final long PRICE_TTL_MS = TimeUnit.MINUTES.toMillis(Math.max(1, SkywaveConfig.get().bazaarRefreshMinutes));
         private final long AUCTION_TTL_MS = TimeUnit.MINUTES.toMillis(10);
         private final long ITEMS_TTL_MS = TimeUnit.HOURS.toMillis(4);
+        private static final long MISSING_ID_LOG_COOLDOWN_MS = TimeUnit.MINUTES.toMillis(2);
 
         public double getPriceFor(String displayName) {
             if (displayName == null) return 0.0;
@@ -521,11 +539,19 @@ public class HuntingProfitTracker {
                 buildItemsIndexIfNeeded(false);
                 String pid = findProductIdFor(displayName);
                 if (pid == null) {
-                    System.out.println("[Skywave] Bazaar lookup: no product id for '" + displayName + "'");
-                    cacheTime.put(displayName, System.currentTimeMillis());
+                    long now = System.currentTimeMillis();
+                    Long last = missingIdLogTime.get(displayName);
+
+                    if (last == null || (now - last) > MISSING_ID_LOG_COOLDOWN_MS) {
+                        System.out.println("[Skywave] Bazaar lookup: no product id for '" + displayName + "'");
+                        missingIdLogTime.put(displayName, now);
+                    }
+
+                    cacheTime.put(displayName, now + TimeUnit.MINUTES.toMillis(1));
                     priceCache.put(displayName, 0.0);
                     return;
                 }
+
                 String apiKey = SkywaveConfig.get().hypixelApiKey;
                 if (apiKey == null || apiKey.isEmpty()) {
                     cacheTime.put(displayName, System.currentTimeMillis());
@@ -685,8 +711,9 @@ public class HuntingProfitTracker {
                     return entry.getValue();
                 }
             }
-
-            return null;
+            // last-ditch guess using typical Hypixel product id naming convention, e.g.
+            // displayName "Night Squid" -> "SHARD_NIGHT_SQUID"
+            return "SHARD_" + displayName.toUpperCase().replaceAll("[^A-Z0-9]+", "_");
         }
 
         private String normalizeLookup(String name) {
