@@ -224,6 +224,9 @@ public class HuntingProfitTracker {
         // Remove stray punctuation and multiple spaces
         String name = candidate.replaceAll("[^\\w\\- '\\:]", " ").replaceAll("\\s+", " ").trim();
 
+        // Safety: remove accidental leading counts
+        name = name.replaceAll("(?i)^x?\\s*\\d+\\s+", "");
+
         if (name.isEmpty()) name = "Shard";
         return new ParsedResult(name, count);
     }
@@ -241,26 +244,28 @@ public class HuntingProfitTracker {
     private String normalizeName(String s) {
         if (s == null) return "Unknown Shard";
 
-        // Remove Minecraft color/format codes just in case
+        // Remove MC formatting
         s = s.replaceAll("§.", "");
 
-        // Remove trailing "Shard"/"Shards"
+        // Remove trailing "Shard(s)"
         s = s.replaceAll("(?i)\\s*Shards?\\s*$", "");
 
-        // Remove non-visible / control chars
+        // Remove leading quantity like "x2 ", "2 ", "x 2 "
+        s = s.replaceAll("(?i)^x?\\s*\\d+\\s+", "");
+
+        // Remove control chars
         s = s.replaceAll("\\p{C}", "");
 
-        // Remove weird punctuation at ends
+        // Trim weird edge symbols
         s = s.replaceAll("^[^A-Za-z0-9]+", "").replaceAll("[^A-Za-z0-9]+$", "");
 
         // Collapse spaces
         s = s.replaceAll("\\s+", " ").trim();
 
-        // Absolute safety fallback
         if (s.isEmpty()) return "Unknown Shard";
-
         return s;
     }
+
 
     public synchronized void startSession() {
         trackerState.startSession();
