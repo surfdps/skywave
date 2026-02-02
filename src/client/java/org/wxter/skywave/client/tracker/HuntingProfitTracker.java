@@ -57,9 +57,13 @@ public class HuntingProfitTracker {
     private HuntingProfitTracker() {
         long initial = 30L;
         long periodMinutes = Math.max(1, SkywaveConfig.get().bazaarRefreshMinutes);
+
+        // also check hunting.showUnitPrices
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                if (SkywaveConfig.get().hypixelApiKey != null && !SkywaveConfig.get().hypixelApiKey.isEmpty()) {
+                SkywaveConfig cfg = SkywaveConfig.get();
+                if (cfg.hypixelApiKey != null && !cfg.hypixelApiKey.isEmpty()
+                        && cfg.hunting != null && cfg.hunting.showUnitPrices) {
                     priceFetcher.refreshAll();
                 }
             } catch (Throwable t) {
@@ -339,24 +343,39 @@ public class HuntingProfitTracker {
             for (Map.Entry<String, Long> e : sorted.entrySet()) {
                 String item = e.getKey();
                 long cnt = e.getValue();
-                double unit = priceFetcher.getPriceFor(item);
-                boolean hasPrice = unit > 0;
-                if (hasPrice) {
-                    hasAnyPrice = true;
-                    totalCoins += unit * cnt;
+
+                if (cfg.showUnitPrices) {
+                    double unit = priceFetcher.getPriceFor(item);
+                    boolean hasPrice = unit > 0;
+                    if (hasPrice) {
+                        hasAnyPrice = true;
+                        totalCoins += unit * cnt;
+                    }
+                    String unitStr = hasPrice ? formatCoins(unit) : "??";
+                    String sumStr = hasPrice ? formatCoins(unit * cnt) : "??";
+                    lines.add(new DisplayLine(item + ": " + cnt + " × " + unitStr + " = " + sumStr, VALUE_COLOR, null));
+                } else {
+                    // simpler line when unit prices are disabled
+                    lines.add(new DisplayLine(item + ": " + cnt, VALUE_COLOR, null));
                 }
-                String unitStr = hasPrice ? formatCoins(unit) : "??";
-                String sumStr = hasPrice ? formatCoins(unit * cnt) : "??";
-                lines.add(new DisplayLine(item + ": " + cnt + " × " + unitStr + " = " + sumStr, VALUE_COLOR, null));
             }
         }
 
-        String totalLine = "Total: " + (hasAnyPrice ? formatCoins(totalCoins) : "??");
-        lines.add(new DisplayLine(totalLine, VALUE_COLOR, null));
+        if (cfg.showUnitPrices) {
+            String totalLine = "Total: " + (hasAnyPrice ? formatCoins(totalCoins) : "??");
+            lines.add(new DisplayLine(totalLine, VALUE_COLOR, null));
 
-        double hours = getSessionHoursElapsed();
-        double coinsPerHour = hours > 0 ? totalCoins / hours : 0.0;
-        lines.add(new DisplayLine("Coins/hour: " + formatCoins(coinsPerHour), MUTED_COLOR, null));
+            double hours = getSessionHoursElapsed();
+            double coinsPerHour = hours > 0 ? totalCoins / hours : 0.0;
+            lines.add(new DisplayLine("Coins/hour: " + formatCoins(coinsPerHour), MUTED_COLOR, null));
+        } else {
+            long totalShards = counts.values().stream().mapToLong(Long::longValue).sum();
+            lines.add(new DisplayLine("Total shards: " + totalShards, VALUE_COLOR, null));
+
+            double hours = getSessionHoursElapsed();
+            double shardsPerHour = hours > 0 ? (totalShards / hours) : 0.0;
+            lines.add(new DisplayLine("Shards/hour: " + String.format("%,.2f", shardsPerHour), MUTED_COLOR, null));
+        }
 
         return lines;
     }
@@ -502,6 +521,7 @@ public class HuntingProfitTracker {
                 buildItemsIndexIfNeeded(false);
                 String pid = findProductIdFor(displayName);
                 if (pid == null) {
+                    System.out.println("[Skywave] Bazaar lookup: no product id for '" + displayName + "'");
                     cacheTime.put(displayName, System.currentTimeMillis());
                     priceCache.put(displayName, 0.0);
                     return;
@@ -644,15 +664,34 @@ public class HuntingProfitTracker {
 
         private String findProductIdFor(String displayName) {
             if (displayName == null) return null;
+
+            // direct exact name match first
             String direct = nameToProductId.get(displayName);
             if (direct != null) return direct;
+
             String normalized = normalizeLookup(displayName);
+
+            // direct normalized match
             String mapped = normalizedNameToId.get(normalized);
             if (mapped != null) return mapped;
+
+            // Fallback: try fuzzy contains / startsWith matches against the normalized index
+            // (this helps when displayName variants don't exactly match Hypixel item names)
+            for (var entry : normalizedNameToId.entrySet()) {
+                String key = entry.getKey();
+                if (key == null) continue;
+                if (key.contains(normalized) || normalized.contains(key)
+                        || key.startsWith(normalized) || normalized.startsWith(key)) {
+                    return entry.getValue();
+                }
+            }
+
             return null;
         }
 
         private String normalizeLookup(String name) {
+            if (name == null) return "";
+            // Lowercase and remove non-alphanumerics; keep a compact representation for matching
             return name.toLowerCase().replaceAll("[^a-z0-9]", "");
         }
     }

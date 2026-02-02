@@ -5,6 +5,7 @@ import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.scoreboard.Team;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import org.wxter.skywave.config.SkywaveConfig;
 
@@ -67,14 +68,38 @@ public final class EntityHighlightHelper {
                     box.minX - 0.5, box.minY, box.minZ - 0.5,
                     box.maxX + 0.5, box.maxY + 3.0, box.maxZ + 0.5
             );
+
             List<ArmorStandEntity> stands = world.getEntitiesByClass(ArmorStandEntity.class, search, e -> true);
+            ArmorStandEntity best = null;
+            double bestScore = Double.MAX_VALUE;
+            // center of entity for horizontal proximity checks
+            Vec3d center = box.getCenter();
+
             for (ArmorStandEntity stand : stands) {
-                if (stand.hasCustomName()) {
-                    Text name = stand.getCustomName();
-                    if (name != null) {
-                        String s = name.getString();
-                        if (s != null && !s.isEmpty()) return s;
-                    }
+                if (!stand.hasCustomName()) continue;
+
+                // require the stand to be above the entity's top (makes it more likely to be the nametag owner)
+                if (stand.getY() < box.maxY - 0.05) continue;
+
+                // horizontal distance between stand and entity center
+                double dx = stand.getX() - center.x;
+                double dz = stand.getZ() - center.z;
+                double horiz = Math.sqrt(dx * dx + dz * dz);
+                if (horiz > 1.5) continue; // too far horizontally
+
+                // prefer stands that are very close and above; score by horiz + vertical offset
+                double score = horiz + Math.abs(stand.getY() - box.maxY);
+                if (score < bestScore) {
+                    bestScore = score;
+                    best = stand;
+                }
+            }
+
+            if (best != null) {
+                Text name = best.getCustomName();
+                if (name != null) {
+                    String s = name.getString();
+                    if (s != null && !s.isEmpty()) return s;
                 }
             }
         }

@@ -79,9 +79,9 @@ public class SkywaveConfig {
     // ============================
 
     // ===== Hypixel API =====
-    public String hypixelApiKey = "";
+    public String hypixelApiKey = "c988914d-02e4-40b7-a484-2c35e6c04141";
     /** minutes */
-    public int bazaarRefreshMinutes = 5;
+    public int bazaarRefreshMinutes = 1;
     // =======================
 
     // ===== HUD Positions =====
