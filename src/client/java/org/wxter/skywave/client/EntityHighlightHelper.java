@@ -10,6 +10,7 @@ import net.minecraft.world.World;
 import org.wxter.skywave.config.SkywaveConfig;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Resolves entity display names for mob highlighting. Works with entity custom names,
@@ -23,6 +24,7 @@ public final class EntityHighlightHelper {
      * Returns true if the entity's resolved display name matches any configured nametag.
      */
     public static boolean matchesNametags(Entity entity) {
+        if (entity instanceof ArmorStandEntity) return false;
         SkywaveConfig config = SkywaveConfig.get();
         if (!config.mobHighlightEnabled || config.mobHighlightNametags == null || config.mobHighlightNametags.isEmpty()) {
             return false;
@@ -30,11 +32,13 @@ public final class EntityHighlightHelper {
         String displayName = resolveDisplayName(entity);
         if (displayName == null || displayName.isEmpty()) return false;
         String trimmed = displayName.trim();
+        String trimmedLower = trimmed.toLowerCase(Locale.ROOT);
         for (String tag : config.mobHighlightNametags) {
             if (tag == null) continue;
             String t = tag.trim();
             if (t.isEmpty()) continue;
-            if (trimmed.equalsIgnoreCase(t) || trimmed.contains(t)) return true;
+            String tLower = t.toLowerCase(Locale.ROOT);
+            if (trimmedLower.equals(tLower) || trimmedLower.contains(tLower)) return true;
         }
         return false;
     }
@@ -52,15 +56,6 @@ public final class EntityHighlightHelper {
             }
         }
 
-        Team team = entity.getScoreboardTeam();
-        if (team != null) {
-            Text displayName = team.getDisplayName();
-            if (displayName != null) {
-                String s = displayName.getString();
-                if (s != null && !s.isEmpty()) return s;
-            }
-        }
-
         World world = entity.getEntityWorld();
         if (world != null) {
             Box box = entity.getBoundingBox();
@@ -74,12 +69,13 @@ public final class EntityHighlightHelper {
             double bestScore = Double.MAX_VALUE;
             // center of entity for horizontal proximity checks
             Vec3d center = box.getCenter();
+            double minAllowedY = box.minY + (box.getLengthY() * 0.6);
 
             for (ArmorStandEntity stand : stands) {
                 if (!stand.hasCustomName()) continue;
 
-                // require the stand to be above the entity's top (makes it more likely to be the nametag owner)
-                if (stand.getY() < box.maxY - 0.05) continue;
+                // require the stand to be near the top of the entity (player-model NPC stands can sit slightly below maxY)
+                if (stand.getY() < minAllowedY) continue;
 
                 // horizontal distance between stand and entity center
                 double dx = stand.getX() - center.x;
@@ -102,6 +98,21 @@ public final class EntityHighlightHelper {
                     if (s != null && !s.isEmpty()) return s;
                 }
             }
+        }
+
+        Team team = entity.getScoreboardTeam();
+        if (team != null) {
+            Text displayName = team.getDisplayName();
+            if (displayName != null) {
+                String s = displayName.getString();
+                if (s != null && !s.isEmpty()) return s;
+            }
+        }
+
+        Text displayName = entity.getDisplayName();
+        if (displayName != null) {
+            String s = displayName.getString();
+            if (s != null && !s.isEmpty()) return s;
         }
 
         return entity.getName().getString();

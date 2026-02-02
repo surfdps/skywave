@@ -9,6 +9,7 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
+import org.wxter.skywave.ModConstants;
 import org.lwjgl.glfw.GLFW;
 import org.wxter.skywave.config.SkywaveConfig;
 
@@ -36,7 +37,7 @@ public class HuntingProfitTracker {
 
     private static final int TITLE_COLOR = 0xFF55FFFF;
     private static final int ACTION_COLOR = 0xFFFFFF55;
-    private static final int VALUE_COLOR = 0xFFFFAA;
+    private static final int VALUE_COLOR = 0xFFFFFFAA;
     private static final int MUTED_COLOR = 0xFFB0B0B0;
 
     private final ItemTrackerState trackerState = new ItemTrackerState(new HuntingStorage());
@@ -67,7 +68,7 @@ public class HuntingProfitTracker {
                     priceFetcher.refreshAll();
                 }
             } catch (Throwable t) {
-                t.printStackTrace();
+                ModConstants.LOGGER.error("HuntingProfitTracker scheduled refresh failed", t);
             }
         }, initial, periodMinutes, TimeUnit.MINUTES);
     }
@@ -77,7 +78,7 @@ public class HuntingProfitTracker {
             try {
                 if (message != null) handleChatMessage(message.getString());
             } catch (Throwable t) {
-                t.printStackTrace();
+                ModConstants.LOGGER.error("HuntingProfitTracker chat handler failed", t);
             }
         });
 
@@ -85,7 +86,7 @@ public class HuntingProfitTracker {
             try {
                 onHudRender(drawContext);
             } catch (Throwable t) {
-                t.printStackTrace();
+                ModConstants.LOGGER.error("HuntingProfitTracker HUD render failed", t);
             }
         });
 
@@ -94,7 +95,7 @@ public class HuntingProfitTracker {
                 try {
                     onScreenRender(drawContext);
                 } catch (Throwable t) {
-                    t.printStackTrace();
+                    ModConstants.LOGGER.error("HuntingProfitTracker screen render failed", t);
                 }
             });
         });
@@ -132,7 +133,7 @@ public class HuntingProfitTracker {
     }
 
     private String stripColorCodes(String s) {
-        return s == null ? "" : s.replaceAll("§.", "");
+        return s == null ? "" : s.replaceAll("\u00A7.", "");
     }
 
     private static class ParsedResult {
@@ -238,14 +239,14 @@ public class HuntingProfitTracker {
             name = "Unknown Shard";
         }
         trackerState.recordItem(name, count);
-        System.out.println("[Skywave DEBUG] Recording shard name = '" + name + "'");
+        ModConstants.LOGGER.debug("Recording shard: name='{}' count={}", name, count);
     }
 
     private String normalizeName(String s) {
         if (s == null) return "Unknown Shard";
 
         // Remove MC formatting
-        s = s.replaceAll("§.", "");
+        s = s.replaceAll("\u00A7.", "");
 
         // Remove trailing "Shard(s)"
         s = s.replaceAll("(?i)\\s*Shards?\\s*$", "");
@@ -398,7 +399,7 @@ public class HuntingProfitTracker {
                     }
                     String unitStr = hasPrice ? formatCoins(unit) : "??";
                     String sumStr = hasPrice ? formatCoins(unit * cnt) : "??";
-                    lines.add(new DisplayLine(item + ": " + cnt + " × " + unitStr + " = " + sumStr, VALUE_COLOR, null));
+                    lines.add(new DisplayLine(item + ": " + cnt + " x " + unitStr + " = " + sumStr, VALUE_COLOR, null));
                 } else {
                     // simpler line when unit prices are disabled
                     lines.add(new DisplayLine(item + ": " + cnt, VALUE_COLOR, null));
@@ -559,7 +560,7 @@ public class HuntingProfitTracker {
                 buildItemsIndexIfNeeded(true);
                 fetchBazaarAll();
             } catch (Throwable t) {
-                t.printStackTrace();
+                ModConstants.LOGGER.error("Bazaar refresh failed", t);
             }
         }
 
@@ -572,7 +573,7 @@ public class HuntingProfitTracker {
                     Long last = missingIdLogTime.get(displayName);
 
                     if (last == null || (now - last) > MISSING_ID_LOG_COOLDOWN_MS) {
-                        System.out.println("[Skywave] Bazaar lookup: no product id for '" + displayName + "'");
+                        ModConstants.LOGGER.warn("Bazaar lookup: no product id for '{}'", displayName);
                         missingIdLogTime.put(displayName, now);
                     }
 
@@ -615,9 +616,9 @@ public class HuntingProfitTracker {
                     fetchAuctionPriceFor(displayName);
                 }
             } catch (IOException | InterruptedException e) {
-                e.printStackTrace();
+                ModConstants.LOGGER.error("Price fetch failed for '{}'", displayName, e);
             } catch (Throwable t) {
-                t.printStackTrace();
+                ModConstants.LOGGER.error("Price fetch failed for '{}'", displayName, t);
             }
         }
 
@@ -644,7 +645,7 @@ public class HuntingProfitTracker {
                     cacheTime.put(display, System.currentTimeMillis());
                 }
             } catch (IOException | InterruptedException e) {
-                e.printStackTrace();
+                ModConstants.LOGGER.error("Bazaar refresh failed", e);
             }
         }
 
@@ -671,7 +672,7 @@ public class HuntingProfitTracker {
                 auctionPriceCache.put(displayName, lowest);
                 auctionCacheTime.put(displayName, System.currentTimeMillis());
             } catch (IOException | InterruptedException e) {
-                e.printStackTrace();
+                ModConstants.LOGGER.error("Auction price fetch failed for '{}'", displayName, e);
             }
         }
 
@@ -713,7 +714,7 @@ public class HuntingProfitTracker {
                 }
                 itemsIndexFetchedAt = now;
             } catch (IOException | InterruptedException e) {
-                e.printStackTrace();
+                ModConstants.LOGGER.error("Item index fetch failed", e);
             }
         }
 
