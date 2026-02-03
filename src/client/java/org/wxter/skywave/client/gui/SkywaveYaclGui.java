@@ -10,7 +10,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.text.Text;
 import org.wxter.skywave.config.SkywaveConfig;
-import org.wxter.skywave.client.tracker.HuntingProfitTracker;
 
 import java.awt.Color;
 import java.util.List;
@@ -45,7 +44,7 @@ public class SkywaveYaclGui {
 
                                 // delivery type (enum dropdown/cycler)
                                 .option(Option.<SkywaveConfig.RainReminderType>createBuilder()
-                                        .name(Text.literal("Reminder delivery"))
+                                        .name(Text.literal("Reminder Type"))
                                         .description(OptionDescription.of(Text.literal(
                                                 "Choose where the notification appears: chat or on-screen message.\n\nRequires enabled Rain Reminder feature!"
                                         )))
@@ -61,7 +60,7 @@ public class SkywaveYaclGui {
 
                                 // sound toggle
                                 .option(Option.<Boolean>createBuilder()
-                                        .name(Text.literal("Reminder sound"))
+                                        .name(Text.literal("Reminder Sound"))
                                         .description(OptionDescription.of(Text.literal(
                                                 "Play a short tone when rain ends.\n\nRequires enabled Rain Reminder feature!"
                                         )))
@@ -124,6 +123,22 @@ public class SkywaveYaclGui {
                             .controller(StringControllerBuilder::create)
                             .initial("")
                             .build())
+
+                        .group(OptionGroup.createBuilder()
+                                .name(Text.literal("HUD"))
+                                .option(Option.<Boolean>createBuilder()
+                                        .name(Text.literal("HUD background panels"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "Draw a subtle background panel behind trackers (applies to all trackers)."
+                                        )))
+                                        .binding(
+                                                true,
+                                                () -> SkywaveConfig.get().hudBackgroundPanelsEnabled,
+                                                v -> SkywaveConfig.get().hudBackgroundPanelsEnabled = v
+                                        )
+                                        .controller(TickBoxControllerBuilder::create)
+                                        .build())
+                                .build())
                         .build())
 
                 // Hunting Category
@@ -133,7 +148,7 @@ public class SkywaveYaclGui {
                                 .name(Text.literal("Profit Tracker"))
                                 .option(Option.<Boolean>createBuilder()
                                         .name(Text.literal("Hunting Profit Tracker"))
-                                        .description(OptionDescription.of(Text.literal("Track profit from shards via hunting.\n\nOnly tracks shards, no other items!")))
+                                        .description(OptionDescription.of(Text.literal("Track profit from shards when hunting.\n\nOnly tracks shards, no other items!")))
                                         .binding(
                                                 true,
                                                 () -> SkywaveConfig.get().hunting.profitTrackerEnabled,
@@ -142,23 +157,9 @@ public class SkywaveYaclGui {
                                         .controller(TickBoxControllerBuilder::create)
                                         .build())
 
-                                .option(Option.<Boolean>createBuilder()
-                                        .name(Text.literal("Start Counting (Start/Stop)"))
-                                        .description(OptionDescription.of(Text.literal("Toggle shards counting.\n\nAlso clickable on HUD)")))
-                                        .binding(
-                                                false,
-                                                HuntingProfitTracker.INSTANCE::isRunning,
-                                                (Boolean v) -> {
-                                                    if (v) HuntingProfitTracker.INSTANCE.startSession();
-                                                    else HuntingProfitTracker.INSTANCE.stopSession();
-                                                }
-                                        )
-                                        .controller(TickBoxControllerBuilder::create)
-                                        .build())
-
                                 .option(Option.<SkywaveConfig.DisplayMode>createBuilder()
                                         .name(Text.literal("Display Mode"))
-                                        .description(OptionDescription.of(Text.literal("Choose whether HUD shows Total or Session shards profit.")))
+                                        .description(OptionDescription.of(Text.literal("Choose whether HUD shows Total or Session shards profit.\n\nAlso clickable in UI.")))
                                         .binding(
                                                 SkywaveConfig.get().hunting.displayMode,
                                                 () -> SkywaveConfig.get().hunting.displayMode,
@@ -167,9 +168,22 @@ public class SkywaveYaclGui {
                                         .controller(opt -> EnumControllerBuilder.create(opt).enumClass(SkywaveConfig.DisplayMode.class))
                                         .build())
 
+                                .option(Option.<SkywaveConfig.BazaarPriceMode>createBuilder()
+                                        .name(Text.literal("Price Mode"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "Choose which bazaar value to use for shard profit: buy offer or sell offer.\n\nAlso clickable in the tracker UI."
+                                        )))
+                                        .binding(
+                                                SkywaveConfig.get().hunting.bazaarPriceMode,
+                                                () -> SkywaveConfig.get().hunting.bazaarPriceMode,
+                                                (SkywaveConfig.BazaarPriceMode m) -> SkywaveConfig.get().hunting.bazaarPriceMode = m
+                                        )
+                                        .controller(opt -> EnumControllerBuilder.create(opt).enumClass(SkywaveConfig.BazaarPriceMode.class))
+                                        .build())
+
                                 .option(Option.<Boolean>createBuilder()
                                         .name(Text.literal("Show Timer"))
-                                        .description(OptionDescription.of(Text.literal("Show session timer on the tracker HUD.")))
+                                        .description(OptionDescription.of(Text.literal("Show session timer in tracker. Starting/Pausing manually in UI.")))
                                         .binding(
                                                 true,
                                                 () -> SkywaveConfig.get().hunting.showTimer,

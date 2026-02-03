@@ -27,6 +27,11 @@ public class SkywaveConfig {
         SESSION
     }
 
+    public enum BazaarPriceMode {
+        BUY_OFFER,
+        SELL_OFFER
+    }
+
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("skywave.json");
 
@@ -40,6 +45,9 @@ public class SkywaveConfig {
     public boolean mobHighlightEnabled = true;
     public List<String> mobHighlightNametags = new ArrayList<>(List.of("Night Squid"));
     public int mobHighlightColor = 0xFF00BFFF;
+
+    /** Draw background panels behind HUD trackers (applies to all trackers). */
+    public boolean hudBackgroundPanelsEnabled = true;
     // ===================
 
     // ===== HUNTING TRACKER =====
@@ -49,6 +57,7 @@ public class SkywaveConfig {
         public boolean profitTrackerEnabled = false;
         public boolean showTimer = true;
         public DisplayMode displayMode = DisplayMode.SESSION;
+        public BazaarPriceMode bazaarPriceMode = BazaarPriceMode.BUY_OFFER;
 
         public List<String> chatPatterns = new ArrayList<>(List.of(
                 // generic
@@ -79,7 +88,7 @@ public class SkywaveConfig {
     // ============================
 
     // ===== Hypixel API =====
-    public String hypixelApiKey = "c988914d-02e4-40b7-a484-2c35e6c04141";
+    public String hypixelApiKey = "8c0960f8-3b18-41ca-82cb-7c55b4ac67b7";
     /** minutes */
     public int bazaarRefreshMinutes = 1;
     // =======================

@@ -5,6 +5,7 @@ import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
+import org.wxter.skywave.client.HypixelSkyblockContext;
 import org.wxter.skywave.config.SkywaveConfig;
 
 public class RainReminderHandler {
@@ -13,6 +14,7 @@ public class RainReminderHandler {
 
     public static void tick(MinecraftClient client) {
         if (client.world == null || client.player == null) return;
+        if (!HypixelSkyblockContext.isOnHypixelSkyblock(client)) return;
         if (!SkywaveConfig.get().rainReminderEnabled) return;
 
         boolean isRaining = client.world.isRaining();

@@ -13,6 +13,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import org.wxter.skywave.client.EntityHighlightHelper;
+import org.wxter.skywave.client.HypixelSkyblockContext;
 import org.wxter.skywave.config.SkywaveConfig;
 
 import java.util.HashMap;
@@ -36,6 +37,7 @@ public class MixinMinecraftClient {
 
     @Inject(method = "hasOutline", at = @At("HEAD"), cancellable = true)
     private void skywave$mobHighlightOutline(Entity entity, CallbackInfoReturnable<Boolean> cir) {
+        if (!HypixelSkyblockContext.isOnHypixelSkyblock()) return;
         if (!EntityHighlightHelper.matchesNametags(entity)) return;
 
         Boolean cached = skywave$visibilityCache.get(entity.getUuid());

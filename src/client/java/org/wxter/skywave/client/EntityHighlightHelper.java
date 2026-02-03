@@ -7,6 +7,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
+import org.wxter.skywave.client.HypixelSkyblockContext;
 import org.wxter.skywave.config.SkywaveConfig;
 
 import java.util.List;
@@ -25,6 +26,7 @@ public final class EntityHighlightHelper {
      */
     public static boolean matchesNametags(Entity entity) {
         if (entity instanceof ArmorStandEntity) return false;
+        if (!HypixelSkyblockContext.isOnHypixelSkyblock()) return false;
         SkywaveConfig config = SkywaveConfig.get();
         if (!config.mobHighlightEnabled || config.mobHighlightNametags == null || config.mobHighlightNametags.isEmpty()) {
             return false;

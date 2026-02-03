@@ -9,8 +9,12 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.screen.ChatScreen;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import org.wxter.skywave.ModConstants;
 import org.lwjgl.glfw.GLFW;
+import org.wxter.skywave.client.HypixelSkyblockContext;
+import org.wxter.skywave.client.gui.HudPanelRenderer;
 import org.wxter.skywave.config.SkywaveConfig;
 
 import java.io.IOException;
@@ -20,9 +24,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
@@ -39,9 +44,21 @@ public class HuntingProfitTracker {
     private static final int ACTION_COLOR = 0xFFFFFF55;
     private static final int VALUE_COLOR = 0xFFFFFFAA;
     private static final int MUTED_COLOR = 0xFFB0B0B0;
+    private static final int DANGER_COLOR = 0xFFFF5555;
+    private static final int SUCCESS_COLOR = 0xFF55FF55;
 
     private final ItemTrackerState trackerState = new ItemTrackerState(new HuntingStorage());
     private final List<ClickableRegion> clickRegions = new ArrayList<>();
+    private final ConcurrentHashMap<String, Long> highlightUntilByKey = new ConcurrentHashMap<>();
+
+    private static final int MAX_VISIBLE_ITEM_LINES = 6;
+    private int itemScrollOffset = 0;
+    private int lastRenderedItemLines = 0;
+    private int lastMouseX = -1;
+    private int lastMouseY = -1;
+
+    private volatile double cachedCoinsPerHour = 0.0;
+    private volatile long cachedCoinsPerHourAt = 0L;
 
     private boolean moveMode = false;
     private boolean lastLeftWasDown = false;
@@ -99,15 +116,31 @@ public class HuntingProfitTracker {
                 }
             });
         });
+
+        // Try to warm the price cache shortly after client init (without waiting for the periodic scheduler).
+        scheduler.execute(() -> {
+            try {
+                SkywaveConfig cfg = SkywaveConfig.get();
+                if (cfg.hypixelApiKey != null && !cfg.hypixelApiKey.isEmpty()
+                        && cfg.hunting != null && cfg.hunting.showUnitPrices) {
+                    priceFetcher.refreshAll();
+                }
+            } catch (Throwable t) {
+                ModConstants.LOGGER.error("HuntingProfitTracker initial price warmup failed", t);
+            }
+        });
     }
 
     private void handleChatMessage(String raw) {
         if (raw == null) return;
         SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
         if (cfg == null || !cfg.profitTrackerEnabled || !trackerState.isRunning()) return;
+        if (!moveMode && !HypixelSkyblockContext.isOnHypixelSkyblock()) return;
 
         String plain = stripColorCodes(raw).trim();
         if (plain.isEmpty()) return;
+
+        boolean lootshare = plain.toLowerCase().contains("loot share");
 
         boolean matched = false;
         for (String pat : cfg.chatPatterns) {
@@ -117,7 +150,7 @@ public class HuntingProfitTracker {
                 if (m.find()) {
                     ParsedResult r = parseFromMatcher(m, plain);
                     if (r != null) {
-                        recordShard(r.name, r.count);
+                        recordShard(r.name, r.count, lootshare);
                         matched = true;
                         break;
                     }
@@ -128,7 +161,7 @@ public class HuntingProfitTracker {
 
         if (!matched && plain.toLowerCase().contains("shard")) {
             ParsedResult r = parseByProximity(plain);
-            if (r != null) recordShard(r.name, r.count);
+            if (r != null) recordShard(r.name, r.count, lootshare);
         }
     }
 
@@ -226,20 +259,50 @@ public class HuntingProfitTracker {
         String name = candidate.replaceAll("[^\\w\\- '\\:]", " ").replaceAll("\\s+", " ").trim();
 
         // Safety: remove accidental leading counts
-        name = name.replaceAll("(?i)^x?\\s*\\d+\\s+", "");
+        name = name.replaceAll("(?i)^[xх×✕]?\\s*\\d+\\s+", "");
 
         if (name.isEmpty()) name = "Shard";
         return new ParsedResult(name, count);
     }
 
-    private void recordShard(String rawName, int count) {
+    private static final String KEY_LOOTSHARE_SUFFIX = "||lootshare";
+
+    private List<String> getAllTrackedBaseNames() {
+        try {
+            Set<String> names = ConcurrentHashMap.newKeySet();
+            Map<String, Long> total = trackerState.getCounts(SkywaveConfig.DisplayMode.TOTAL);
+            Map<String, Long> session = trackerState.getCounts(SkywaveConfig.DisplayMode.SESSION);
+            if (total != null) {
+                for (String k : total.keySet()) {
+                    if (k == null) continue;
+                    String base = k.endsWith(KEY_LOOTSHARE_SUFFIX) ? k.substring(0, k.length() - KEY_LOOTSHARE_SUFFIX.length()) : k;
+                    if (!base.isBlank()) names.add(base);
+                }
+            }
+            if (session != null) {
+                for (String k : session.keySet()) {
+                    if (k == null) continue;
+                    String base = k.endsWith(KEY_LOOTSHARE_SUFFIX) ? k.substring(0, k.length() - KEY_LOOTSHARE_SUFFIX.length()) : k;
+                    if (!base.isBlank()) names.add(base);
+                }
+            }
+            return new ArrayList<>(names);
+        } catch (Throwable t) {
+            ModConstants.LOGGER.error("Failed to compute tracked base names for price refresh", t);
+            return Collections.emptyList();
+        }
+    }
+
+    private void recordShard(String rawName, int count, boolean lootshare) {
         if (rawName == null || rawName.isEmpty()) rawName = "Shard";
         String name = normalizeName(rawName);
         if (name == null || name.isBlank()) {
             name = "Unknown Shard";
         }
-        trackerState.recordItem(name, count);
-        ModConstants.LOGGER.debug("Recording shard: name='{}' count={}", name, count);
+        String key = lootshare ? (name + KEY_LOOTSHARE_SUFFIX) : name;
+        trackerState.recordItem(key, count);
+        highlightUntilByKey.put(key, System.currentTimeMillis() + 3_000L);
+        ModConstants.LOGGER.debug("Recording shard: name='{}' lootshare={} count={}", name, lootshare, count);
     }
 
     private String normalizeName(String s) {
@@ -248,11 +311,12 @@ public class HuntingProfitTracker {
         // Remove MC formatting
         s = s.replaceAll("\u00A7.", "");
 
-        // Remove trailing "Shard(s)"
+        // Remove trailing "Shard(s)" (tracker stores base name; price lookup adds suffix back when needed)
         s = s.replaceAll("(?i)\\s*Shards?\\s*$", "");
 
         // Remove leading quantity like "x2 ", "2 ", "x 2 "
-        s = s.replaceAll("(?i)^x?\\s*\\d+\\s+", "");
+        s = s.replaceAll("(?i)^[xх×✕]?\\s*\\d+\\s+", "");
+        s = s.replaceAll("(?i)^[xх×✕]\\s*\\d+\\s*", "");
 
         // Remove control chars
         s = s.replaceAll("\\p{C}", "");
@@ -302,10 +366,12 @@ public class HuntingProfitTracker {
 
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null) return;
+        if (!moveMode && !HypixelSkyblockContext.isOnHypixelSkyblock(client)) return;
 
-        if (client.currentScreen != null) return;
+        if (!moveMode && client.currentScreen != null) return;
         boolean allowClicks = !moveMode;
-        drawHud(ctx, cfg, client, allowClicks);
+        boolean showControls = false;
+        drawHud(ctx, cfg, client, allowClicks, showControls);
     }
 
     private void onScreenRender(DrawContext ctx) {
@@ -315,116 +381,258 @@ public class HuntingProfitTracker {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null) return;
         if (client.currentScreen == null) return;
+        if (!moveMode && !HypixelSkyblockContext.isOnHypixelSkyblock(client)) return;
+
+        // Render only on "in-game" screens where a HUD overlay makes sense:
+        // inventory/container (controls), or chat (no controls). Avoid config/mod menus.
+        boolean isInventory = client.currentScreen instanceof HandledScreen<?>;
+        boolean isChat = client.currentScreen instanceof ChatScreen;
+        if (!moveMode && !isInventory && !isChat) return;
 
         boolean allowClicks = !moveMode;
-        drawHud(ctx, cfg, client, allowClicks);
+        boolean showControls = isInventory;
+        drawHud(ctx, cfg, client, allowClicks, showControls);
     }
 
-    private void drawHud(DrawContext ctx, SkywaveConfig.HuntingConfig cfg, MinecraftClient client, boolean allowClicks) {
+    private void drawHud(DrawContext ctx, SkywaveConfig.HuntingConfig cfg, MinecraftClient client, boolean allowClicks, boolean showControls) {
         int x = cfg.hudX;
         int y = cfg.hudY;
 
         TextRenderer tr = client.textRenderer;
         clickRegions.clear();
 
-        List<DisplayLine> lines = buildLines(cfg);
+        List<DisplayLine> lines = buildLines(cfg, showControls);
         int lineHeight = tr.fontHeight + 2;
 
-        int maxWidth = 0;
-        int ly = y;
+        int gap = tr.getWidth("  ");
+        int maxCountCol = 0;
+        int maxPriceCol = 0;
         for (DisplayLine line : lines) {
-            int width = tr.getWidth(line.text());
-            maxWidth = Math.max(maxWidth, width);
-            ctx.drawTextWithShadow(tr, line.text(), x, ly, line.color());
-            if (allowClicks && line.onClick() != null) {
-                clickRegions.add(new ClickableRegion(x, ly, width, tr.fontHeight, line.onClick()));
-            }
-            ly += lineHeight;
+            if (line.kind != DisplayLine.Kind.ITEM) continue;
+            maxCountCol = Math.max(maxCountCol, tr.getWidth(line.itemCountText));
+            maxPriceCol = Math.max(maxPriceCol, tr.getWidth(line.itemPriceText));
         }
 
-        lastHudBounds = new HudBounds(x, y, maxWidth, Math.max(0, lines.size() * lineHeight));
+        int maxWidth = 0;
+        int totalHeight = 0;
+        for (DisplayLine line : lines) {
+            int width = 0;
+            if (line.text != null && !line.text.isEmpty()) {
+                if (line.kind == DisplayLine.Kind.ITEM) {
+                    int nameW = tr.getWidth(line.itemNameText);
+                    width = maxCountCol + gap + nameW + gap + maxPriceCol;
+                } else {
+                    width = tr.getWidth(line.text);
+                    if (line.suffixText != null && !line.suffixText.isEmpty()) {
+                        width += tr.getWidth(line.suffixText);
+                    }
+                    if (line.suffixText2 != null && !line.suffixText2.isEmpty()) {
+                        width += tr.getWidth(line.suffixText2);
+                    }
+                }
+            }
+            maxWidth = Math.max(maxWidth, width);
+            totalHeight += lineHeight + Math.max(0, line.extraSpacingAfter);
+        }
+        totalHeight = Math.max(0, totalHeight);
+
+        // Cache mouse position in scaled coordinates (used for scrolling)
+        long window = client.getWindow().getHandle();
+        double[] mx = new double[1];
+        double[] my = new double[1];
+        GLFW.glfwGetCursorPos(window, mx, my);
+        double scale = client.getWindow().getScaleFactor();
+        lastMouseX = (int) (mx[0] / scale);
+        lastMouseY = (int) (my[0] / scale);
+
+        // background panel (global QoL setting)
+        if (SkywaveConfig.get().hudBackgroundPanelsEnabled && maxWidth > 0 && totalHeight > 0) {
+            HudPanelRenderer.drawRoundedPanel(ctx, x - 4, y - 3, x + maxWidth + 4, y + totalHeight + 3);
+        }
+
+        int ly = y;
+        for (DisplayLine line : lines) {
+            int width = 0;
+            if (line.text != null && !line.text.isEmpty()) {
+                if (line.kind == DisplayLine.Kind.ITEM) {
+                    String countText = line.itemCountText;
+                    if (line.itemCountFlash) {
+                        countText = "§a§l" + countText + "§r";
+                    } else {
+                        countText = "§7" + countText + "§r";
+                    }
+                    String nameText = line.itemNameText;
+                    String priceText = "§6" + line.itemPriceText + "§r";
+
+                    int countW = tr.getWidth(line.itemCountText);
+                    int nameW = tr.getWidth(nameText);
+                    int priceW = tr.getWidth(line.itemPriceText);
+
+                    ctx.drawTextWithShadow(tr, countText, x, ly, 0xFFFFFFFF);
+                    ctx.drawTextWithShadow(tr, nameText, x + maxCountCol + gap, ly, 0xFFFFFFFF);
+                    ctx.drawTextWithShadow(tr, priceText, x + (maxWidth - priceW), ly, 0xFFFFFFFF);
+
+                    width = maxCountCol + gap + nameW + gap + maxPriceCol;
+                } else {
+                    width = tr.getWidth(line.text);
+                    ctx.drawTextWithShadow(tr, line.text, x, ly, line.color);
+
+                    if (line.suffixText != null && !line.suffixText.isEmpty()) {
+                        ctx.drawTextWithShadow(tr, line.suffixText, x + width, ly, line.suffixColor);
+                        width += tr.getWidth(line.suffixText);
+                    }
+
+                    if (line.suffixText2 != null && !line.suffixText2.isEmpty()) {
+                        ctx.drawTextWithShadow(tr, line.suffixText2, x + width, ly, line.suffixColor2);
+                        width += tr.getWidth(line.suffixText2);
+                    }
+                }
+
+                if (allowClicks && line.onClick != null) {
+                    clickRegions.add(new ClickableRegion(x, ly, width, tr.fontHeight, line.onClick));
+                }
+            }
+            ly += lineHeight + Math.max(0, line.extraSpacingAfter);
+        }
+
+        lastHudBounds = new HudBounds(x, y, maxWidth, totalHeight);
 
         if (allowClicks) {
             handleClicks(client);
         }
     }
 
-    private List<DisplayLine> buildLines(SkywaveConfig.HuntingConfig cfg) {
+    private List<DisplayLine> buildLines(SkywaveConfig.HuntingConfig cfg, boolean showControls) {
         List<DisplayLine> lines = new ArrayList<>();
-        lines.add(new DisplayLine("Hunting Profit Tracker", TITLE_COLOR, null));
-
-        String startLabel = trackerState.isRunning() ? "Stop Count" : "Start Count";
-        lines.add(new DisplayLine(startLabel, ACTION_COLOR, () -> {
-            if (trackerState.isRunning()) stopSession();
-            else startSession();
-        }));
-
-        lines.add(new DisplayLine("Mode: " + formatMode(cfg.displayMode), ACTION_COLOR, () -> {
-            cfg.displayMode = cfg.displayMode == SkywaveConfig.DisplayMode.TOTAL
-                    ? SkywaveConfig.DisplayMode.SESSION
-                    : SkywaveConfig.DisplayMode.TOTAL;
-            SkywaveConfig.save();
-        }));
-
-        lines.add(new DisplayLine("Reset Tracker", ACTION_COLOR, () -> reset(cfg.displayMode)));
-
-        if (cfg.showTimer) {
-            String timerLabel = trackerState.isTimerPaused() ? "Resume" : "Pause";
-            String text = "Timer: " + getSessionUptimeFormatted() + " (" + timerLabel + ")";
-            lines.add(new DisplayLine(text, ACTION_COLOR, this::toggleTimerPause));
-        }
+        lines.add(DisplayLine.simple("§lHunting Profit Tracker:§r", TITLE_COLOR));
+        lines.add(DisplayLine.spacer(4));
 
         Map<String, Long> counts = trackerState.getCounts(cfg.displayMode);
-
-        double totalCoins = 0.0;
-        boolean hasAnyPrice = false;
         if (counts.isEmpty()) {
-            lines.add(new DisplayLine("No shards yet", MUTED_COLOR, null));
+            lines.add(DisplayLine.simple("No shards yet", MUTED_COLOR));
         } else {
             Map<String, Long> sorted = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
             sorted.putAll(counts);
+
+            double totalCoins = 0.0;
+            boolean hasAnyPrice = false;
+            List<DisplayLine> itemLines = new ArrayList<>();
+            long now = System.currentTimeMillis();
+
             for (Map.Entry<String, Long> e : sorted.entrySet()) {
-                String item = e.getKey();
+                String rawKey = e.getKey();
                 long cnt = e.getValue();
+                if (rawKey == null || rawKey.isBlank() || cnt <= 0) continue;
 
-                // Skip corrupt entries
-                if (item == null || item.isBlank()) continue;
+                boolean lootshare = rawKey.endsWith(KEY_LOOTSHARE_SUFFIX);
+                String baseName = lootshare ? rawKey.substring(0, rawKey.length() - KEY_LOOTSHARE_SUFFIX.length()) : rawKey;
+                if (baseName.isBlank()) continue;
 
-                if (cfg.showUnitPrices) {
-                    double unit = priceFetcher.getPriceFor(item);
-                    boolean hasPrice = unit > 0;
-                    if (hasPrice) {
-                        hasAnyPrice = true;
-                        totalCoins += unit * cnt;
-                    }
-                    String unitStr = hasPrice ? formatCoins(unit) : "??";
-                    String sumStr = hasPrice ? formatCoins(unit * cnt) : "??";
-                    lines.add(new DisplayLine(item + ": " + cnt + " x " + unitStr + " = " + sumStr, VALUE_COLOR, null));
-                } else {
-                    // simpler line when unit prices are disabled
-                    lines.add(new DisplayLine(item + ": " + cnt, VALUE_COLOR, null));
+                double unit = cfg.showUnitPrices ? priceFetcher.getPriceFor(baseName, cfg.bazaarPriceMode) : 0.0;
+                boolean hasPrice = unit > 0;
+                if (hasPrice) {
+                    hasAnyPrice = true;
+                    totalCoins += unit * cnt;
                 }
+
+                boolean flash = (highlightUntilByKey.getOrDefault(rawKey, 0L) > now);
+                String countText = "x" + cnt;
+
+                String rarity = priceFetcher.getRarityColorCode(baseName);
+                String name = rarity + baseName + "§r §7Shard§r";
+                if (lootshare) {
+                    name += " §8Lootshare§r";
+                }
+
+                String right = cfg.showUnitPrices
+                        ? (hasPrice ? formatCoinsShort(unit * cnt) : "??")
+                        : String.valueOf(cnt);
+
+                itemLines.add(DisplayLine.itemRow(countText, flash, name, right));
+            }
+
+            // collapse/scroll if too many items
+            lastRenderedItemLines = itemLines.size();
+            if (itemLines.size() > MAX_VISIBLE_ITEM_LINES) {
+                int maxOffset = Math.max(0, itemLines.size() - MAX_VISIBLE_ITEM_LINES);
+                itemScrollOffset = Math.max(0, Math.min(itemScrollOffset, maxOffset));
+
+                int start = itemScrollOffset;
+                int end = Math.min(itemLines.size(), itemScrollOffset + MAX_VISIBLE_ITEM_LINES);
+                lines.addAll(itemLines.subList(start, end));
+                lines.add(DisplayLine.simple("§oMore items (scroll)§r", MUTED_COLOR));
+            } else {
+                lines.addAll(itemLines);
+            }
+
+            lines.add(DisplayLine.spacer(4));
+
+            if (cfg.showUnitPrices) {
+                String totalProfit = "Total Profit: " + (hasAnyPrice ? formatCoinsLong(totalCoins) + " coins" : "??");
+                lines.add(DisplayLine.simple(totalProfit, SUCCESS_COLOR));
+
+                double coinsPerHour = getCoinsPerHourCached(totalCoins);
+                lines.add(DisplayLine.simple("Coins/h: " + formatCoinsLong(coinsPerHour), coinsPerHourColor(coinsPerHour)));
+            } else {
+                long totalShards = counts.values().stream().mapToLong(Long::longValue).sum();
+                lines.add(DisplayLine.simple("Total shards: " + totalShards, SUCCESS_COLOR));
+
+                double hours = getSessionHoursElapsed();
+                double shardsPerHour = hours > 0 ? (totalShards / hours) : 0.0;
+                lines.add(DisplayLine.simple("Shards/h: " + String.format("%,.2f", shardsPerHour), MUTED_COLOR));
             }
         }
 
-        if (cfg.showUnitPrices) {
-            String totalLine = "Total: " + (hasAnyPrice ? formatCoins(totalCoins) : "??");
-            lines.add(new DisplayLine(totalLine, VALUE_COLOR, null));
+        if (cfg.showTimer) {
+            String timerValue = getSessionUptimeFormatted();
+            boolean paused = trackerState.isTimerPaused();
 
-            double hours = getSessionHoursElapsed();
-            double coinsPerHour = hours > 0 ? totalCoins / hours : 0.0;
-            lines.add(new DisplayLine("Coins/hour: " + formatCoins(coinsPerHour), MUTED_COLOR, null));
-        } else {
-            long totalShards = counts.values().stream().mapToLong(Long::longValue).sum();
-            lines.add(new DisplayLine("Total shards: " + totalShards, VALUE_COLOR, null));
+            StringBuilder timerText = new StringBuilder("Timer: ").append(timerValue);
+            if (paused) timerText.append(" §cPaused§r");
+            if (showControls) {
+                timerText.append(" §a[").append(paused ? "Resume" : "Pause").append("]§r");
+            }
 
-            double hours = getSessionHoursElapsed();
-            double shardsPerHour = hours > 0 ? (totalShards / hours) : 0.0;
-            lines.add(new DisplayLine("Shards/hour: " + String.format("%,.2f", shardsPerHour), MUTED_COLOR, null));
+            DisplayLine timer = new DisplayLine(timerText.toString(), MUTED_COLOR, showControls ? this::toggleTimerPause : null);
+            lines.add(timer);
         }
 
-        return lines;
-    }
+            if (showControls) {
+                lines.add(DisplayLine.spacer(4));
+
+                String startLabel = trackerState.isRunning() ? "Stop Count" : "Start Count";
+                lines.add(new DisplayLine("§l§a[" + startLabel + "]§r", SUCCESS_COLOR, () -> {
+                    if (trackerState.isRunning()) stopSession();
+                    else startSession();
+                }));
+
+                lines.add(new DisplayLine("§lMode: §a[" + formatMode(cfg.displayMode) + "]§r", SUCCESS_COLOR, () -> {
+                    cfg.displayMode = cfg.displayMode == SkywaveConfig.DisplayMode.TOTAL
+                            ? SkywaveConfig.DisplayMode.SESSION
+                            : SkywaveConfig.DisplayMode.TOTAL;
+                    SkywaveConfig.save();
+                }));
+
+                if (cfg.showUnitPrices) {
+                    String buy = cfg.bazaarPriceMode == SkywaveConfig.BazaarPriceMode.BUY_OFFER
+                            ? "§a[Buy Offer]§r"
+                            : "§2[§7Buy Offer§2]§r";
+                    String sell = cfg.bazaarPriceMode == SkywaveConfig.BazaarPriceMode.SELL_OFFER
+                            ? "§a[Sell Offer]§r"
+                            : "§2[§7Sell Offer§2]§r";
+                    lines.add(new DisplayLine("§lPrice format: " + buy + " §8/§r " + sell, SUCCESS_COLOR, () -> {
+                        cfg.bazaarPriceMode = cfg.bazaarPriceMode == SkywaveConfig.BazaarPriceMode.BUY_OFFER
+                                ? SkywaveConfig.BazaarPriceMode.SELL_OFFER
+                                : SkywaveConfig.BazaarPriceMode.BUY_OFFER;
+                        SkywaveConfig.save();
+                    }));
+                }
+
+                lines.add(new DisplayLine("§lReset Tracker§r", DANGER_COLOR, () -> reset(cfg.displayMode)));
+            }
+
+            return lines;
+        }
 
     private String formatMode(SkywaveConfig.DisplayMode mode) {
         return mode == SkywaveConfig.DisplayMode.TOTAL ? "Total" : "Session";
@@ -432,6 +640,51 @@ public class HuntingProfitTracker {
 
     private String formatCoins(double value) {
         return String.format("%,.2f", value);
+    }
+
+    private String formatCoinsLong(double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) return "0";
+        return String.format("%,.0f", Math.max(0.0, value));
+    }
+
+    private String formatCoinsShort(double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) return "0";
+        double v = Math.max(0.0, value);
+        if (v >= 1_000_000_000) return String.format("%,.2fB", v / 1_000_000_000.0);
+        if (v >= 1_000_000) return String.format("%,.2fM", v / 1_000_000.0);
+        if (v >= 1_000) return String.format("%,.2fK", v / 1_000.0);
+        return String.format("%,.0f", v);
+    }
+
+    private double getCoinsPerHourCached(double totalCoins) {
+        long now = System.currentTimeMillis();
+        if (cachedCoinsPerHourAt == 0L || (now - cachedCoinsPerHourAt) >= 2_000L) {
+            double hours = getSessionHoursElapsed();
+            cachedCoinsPerHour = hours > 0 ? (totalCoins / hours) : 0.0;
+            cachedCoinsPerHourAt = now;
+        }
+        return cachedCoinsPerHour;
+    }
+
+    private int coinsPerHourColor(double cph) {
+        if (cph > 500_000_000) return 0xFF55FFFF; // turquoise
+        if (cph > 100_000_000) return 0xFFFF55FF; // purple
+        if (cph > 50_000_000) return 0xFFFFAA00;  // orange
+        if (cph > 15_000_000) return 0xFFFFFF55;  // yellow
+        if (cph > 0) return 0xFF55FF55;           // green
+        return MUTED_COLOR;
+    }
+
+    public void onMouseScroll(double verticalAmount) {
+        if (verticalAmount == 0) return;
+        SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
+        if (cfg == null || !cfg.profitTrackerEnabled) return;
+        if (lastHudBounds == null || !lastHudBounds.contains(lastMouseX, lastMouseY)) return;
+        if (lastRenderedItemLines <= MAX_VISIBLE_ITEM_LINES) return;
+
+        int maxOffset = Math.max(0, lastRenderedItemLines - MAX_VISIBLE_ITEM_LINES);
+        int delta = verticalAmount > 0 ? -1 : 1;
+        itemScrollOffset = Math.max(0, Math.min(itemScrollOffset + delta, maxOffset));
     }
 
     private void handleClicks(MinecraftClient client) {
@@ -478,7 +731,71 @@ public class HuntingProfitTracker {
         // reserved for future use
     }
 
-    private record DisplayLine(String text, int color, Runnable onClick) {}
+    private static final class DisplayLine {
+        enum Kind { TEXT, ITEM }
+
+        final Kind kind;
+        final String text;
+        final int color;
+        final Runnable onClick;
+        String suffixText;
+        int suffixColor;
+        String suffixText2;
+        int suffixColor2;
+        int extraSpacingAfter;
+
+        // ITEM fields (rendered via drawHud custom columns)
+        String itemCountText;
+        String itemNameText;
+        String itemPriceText;
+        boolean itemCountFlash;
+
+        private DisplayLine(Kind kind, String text, int color, Runnable onClick) {
+            this.kind = kind == null ? Kind.TEXT : kind;
+            this.text = text == null ? "" : text;
+            this.color = color;
+            this.onClick = onClick;
+            this.suffixText = null;
+            this.suffixColor = color;
+            this.suffixText2 = null;
+            this.suffixColor2 = color;
+            this.extraSpacingAfter = 0;
+            this.itemCountText = null;
+            this.itemNameText = null;
+            this.itemPriceText = null;
+            this.itemCountFlash = false;
+        }
+
+        DisplayLine(String text, int color, Runnable onClick) {
+            this(Kind.TEXT, text, color, onClick);
+        }
+
+        static DisplayLine simple(String text, int color) {
+            return new DisplayLine(text, color, null);
+        }
+
+        static DisplayLine spacer(int extraPixels) {
+            DisplayLine line = new DisplayLine("", MUTED_COLOR, null);
+            line.extraSpacingAfter = Math.max(0, extraPixels);
+            return line;
+        }
+
+        static DisplayLine twoCol(String left, String right, int leftColor, int rightColor) {
+            DisplayLine line = new DisplayLine(left, leftColor, null);
+            line.suffixText = " - " + right;
+            line.suffixColor = rightColor;
+            return line;
+        }
+
+        static DisplayLine itemRow(String countText, boolean flash, String nameText, String priceText) {
+            DisplayLine line = new DisplayLine(Kind.ITEM, "__ITEM__", 0xFFFFFFFF, null);
+            line.itemCountText = countText == null ? "" : countText;
+            line.itemCountFlash = flash;
+            line.itemNameText = nameText == null ? "" : nameText;
+            line.itemPriceText = priceText == null ? "" : priceText;
+            return line;
+        }
+    }
 
     private record ClickableRegion(int x, int y, int width, int height, Runnable onClick) {
         boolean contains(int mx, int my) {
@@ -523,233 +840,218 @@ public class HuntingProfitTracker {
 
     private class BazaarPriceFetcher {
         private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
-        private final ConcurrentHashMap<String, Double> priceCache = new ConcurrentHashMap<>();
-        private final ConcurrentHashMap<String, Long> cacheTime = new ConcurrentHashMap<>();
-        private final ConcurrentHashMap<String, Double> auctionPriceCache = new ConcurrentHashMap<>();
-        private final ConcurrentHashMap<String, Long> auctionCacheTime = new ConcurrentHashMap<>();
-        private final ConcurrentHashMap<String, String> nameToProductId = new ConcurrentHashMap<>();
-        private final ConcurrentHashMap<String, String> normalizedNameToId = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, String> baseNameToProductId = new ConcurrentHashMap<>();
         private final ConcurrentHashMap<String, Long> missingIdLogTime = new ConcurrentHashMap<>();
-        private long itemsIndexFetchedAt = 0L;
 
-        private final long PRICE_TTL_MS = TimeUnit.MINUTES.toMillis(Math.max(1, SkywaveConfig.get().bazaarRefreshMinutes));
-        private final long AUCTION_TTL_MS = TimeUnit.MINUTES.toMillis(10);
-        private final long ITEMS_TTL_MS = TimeUnit.HOURS.toMillis(4);
+        private final ConcurrentHashMap<String, Double> buyPriceByProductId = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Double> sellPriceByProductId = new ConcurrentHashMap<>();
+        private volatile long bazaarSnapshotFetchedAt = 0L;
+        private volatile boolean bazaarSnapshotRefreshQueued = false;
+
+        private final ConcurrentHashMap<String, String> rarityColorByBaseName = new ConcurrentHashMap<>();
+        private volatile long itemsIndexFetchedAt = 0L;
+        private volatile boolean itemsIndexRefreshQueued = false;
+
+        private final long SNAPSHOT_TTL_MS = TimeUnit.SECONDS.toMillis(30);
+        private final long ITEMS_TTL_MS = TimeUnit.HOURS.toMillis(6);
         private static final long MISSING_ID_LOG_COOLDOWN_MS = TimeUnit.MINUTES.toMillis(2);
 
-        public double getPriceFor(String displayName) {
-            if (displayName == null) return 0.0;
-            String key = displayName.trim();
-            Long t = cacheTime.get(key);
-            if (t != null && (System.currentTimeMillis() - t) < PRICE_TTL_MS) {
-                double cached = priceCache.getOrDefault(key, 0.0);
-                if (cached > 0) return cached;
+        public double getPriceFor(String baseName, SkywaveConfig.BazaarPriceMode mode) {
+            if (baseName == null || baseName.isBlank()) return 0.0;
+            ensureBazaarSnapshotFresh();
+
+            String productId = resolveBazaarProductId(baseName);
+            if (productId == null) return 0.0;
+            if (mode == SkywaveConfig.BazaarPriceMode.SELL_OFFER) {
+                return sellPriceByProductId.getOrDefault(productId, 0.0);
             }
-            Long auctionTime = auctionCacheTime.get(key);
-            if (auctionTime != null && (System.currentTimeMillis() - auctionTime) < AUCTION_TTL_MS) {
-                return auctionPriceCache.getOrDefault(key, 0.0);
-            }
-            scheduler.execute(() -> fetchPriceFor(key));
-            double fallback = priceCache.getOrDefault(key, 0.0);
-            if (fallback > 0) return fallback;
-            return auctionPriceCache.getOrDefault(key, 0.0);
+            return buyPriceByProductId.getOrDefault(productId, 0.0);
+        }
+
+        public String getRarityColorCode(String baseName) {
+            if (baseName == null || baseName.isBlank()) return "§f";
+            ensureItemsIndexFresh();
+            return rarityColorByBaseName.getOrDefault(baseName, "§f");
         }
 
         public void refreshAll() {
             try {
-                buildItemsIndexIfNeeded(true);
-                fetchBazaarAll();
+                refreshBazaarSnapshot(true);
+                refreshItemsIndex(true);
             } catch (Throwable t) {
                 ModConstants.LOGGER.error("Bazaar refresh failed", t);
             }
         }
 
-        private void fetchPriceFor(String displayName) {
-            try {
-                buildItemsIndexIfNeeded(false);
-                String pid = findProductIdFor(displayName);
-                if (pid == null) {
-                    long now = System.currentTimeMillis();
-                    Long last = missingIdLogTime.get(displayName);
-
-                    if (last == null || (now - last) > MISSING_ID_LOG_COOLDOWN_MS) {
-                        ModConstants.LOGGER.warn("Bazaar lookup: no product id for '{}'", displayName);
-                        missingIdLogTime.put(displayName, now);
-                    }
-
-                    cacheTime.put(displayName, now + TimeUnit.MINUTES.toMillis(1));
-                    priceCache.put(displayName, 0.0);
-                    return;
+        private void ensureBazaarSnapshotFresh() {
+            long now = System.currentTimeMillis();
+            if ((now - bazaarSnapshotFetchedAt) < SNAPSHOT_TTL_MS) return;
+            if (bazaarSnapshotRefreshQueued) return;
+            bazaarSnapshotRefreshQueued = true;
+            scheduler.execute(() -> {
+                try {
+                    refreshBazaarSnapshot(false);
+                } finally {
+                    bazaarSnapshotRefreshQueued = false;
                 }
-
-                String apiKey = SkywaveConfig.get().hypixelApiKey;
-                if (apiKey == null || apiKey.isEmpty()) {
-                    cacheTime.put(displayName, System.currentTimeMillis());
-                    priceCache.put(displayName, 0.0);
-                    return;
-                }
-                String url = "https://api.hypixel.net/v2/skyblock/bazaar?key=" + apiKey;
-                HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().timeout(Duration.ofSeconds(10)).build();
-                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-                if (resp.statusCode() != 200) {
-                    cacheTime.put(displayName, System.currentTimeMillis());
-                    priceCache.put(displayName, 0.0);
-                    return;
-                }
-                JsonObject root = JsonParser.parseString(resp.body()).getAsJsonObject();
-                if (!root.has("products")) {
-                    cacheTime.put(displayName, System.currentTimeMillis());
-                    priceCache.put(displayName, 0.0);
-                    return;
-                }
-                JsonObject products = root.getAsJsonObject("products");
-                if (!products.has(pid)) {
-                    cacheTime.put(displayName, System.currentTimeMillis());
-                    priceCache.put(displayName, 0.0);
-                    return;
-                }
-                JsonObject prod = products.getAsJsonObject(pid);
-                double price = extractPriceFromProduct(prod);
-                priceCache.put(displayName, price);
-                cacheTime.put(displayName, System.currentTimeMillis());
-                if (price <= 0) {
-                    fetchAuctionPriceFor(displayName);
-                }
-            } catch (IOException | InterruptedException e) {
-                ModConstants.LOGGER.error("Price fetch failed for '{}'", displayName, e);
-            } catch (Throwable t) {
-                ModConstants.LOGGER.error("Price fetch failed for '{}'", displayName, t);
-            }
+            });
         }
 
-        private void fetchBazaarAll() {
-            String apiKey = SkywaveConfig.get().hypixelApiKey;
-            if (apiKey == null || apiKey.isEmpty()) return;
+        private void ensureItemsIndexFresh() {
+            long now = System.currentTimeMillis();
+            if ((now - itemsIndexFetchedAt) < ITEMS_TTL_MS && !rarityColorByBaseName.isEmpty()) return;
+            if (itemsIndexRefreshQueued) return;
+            itemsIndexRefreshQueued = true;
+            scheduler.execute(() -> {
+                try {
+                    refreshItemsIndex(false);
+                } finally {
+                    itemsIndexRefreshQueued = false;
+                }
+            });
+        }
+
+        private void refreshBazaarSnapshot(boolean force) {
+            long now = System.currentTimeMillis();
+            if (!force && (now - bazaarSnapshotFetchedAt) < SNAPSHOT_TTL_MS) return;
+
             try {
-                String url = "https://api.hypixel.net/v2/skyblock/bazaar?key=" + apiKey;
+                // This endpoint is accessible without an API key; keep it keyless to avoid requiring user keys.
+                String url = "https://api.hypixel.net/v2/skyblock/bazaar";
                 HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().timeout(Duration.ofSeconds(12)).build();
                 HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
                 if (resp.statusCode() != 200) return;
+
                 JsonObject root = JsonParser.parseString(resp.body()).getAsJsonObject();
+                if (root.has("success") && !root.get("success").getAsBoolean()) return;
                 if (!root.has("products")) return;
                 JsonObject products = root.getAsJsonObject("products");
-                for (String key : products.keySet()) {
-                    JsonObject prod = products.getAsJsonObject(key);
-                    double price = extractPriceFromProduct(prod);
-                    String display = nameToProductId.entrySet().stream()
-                            .filter(e -> Objects.equals(e.getValue(), key))
-                            .map(Map.Entry::getKey)
-                            .findFirst()
-                            .orElse(key);
-                    priceCache.put(display, price);
-                    cacheTime.put(display, System.currentTimeMillis());
+
+                buyPriceByProductId.clear();
+                sellPriceByProductId.clear();
+                for (String productId : products.keySet()) {
+                    JsonObject prod = products.getAsJsonObject(productId);
+                    if (prod == null || !prod.has("quick_status")) continue;
+                    JsonObject qs = prod.getAsJsonObject("quick_status");
+                    double buy = qs.has("buyPrice") ? qs.get("buyPrice").getAsDouble() : 0.0;
+                    double sell = qs.has("sellPrice") ? qs.get("sellPrice").getAsDouble() : 0.0;
+                    buyPriceByProductId.put(productId, Math.max(0.0, buy));
+                    sellPriceByProductId.put(productId, Math.max(0.0, sell));
                 }
+
+                bazaarSnapshotFetchedAt = now;
             } catch (IOException | InterruptedException e) {
-                ModConstants.LOGGER.error("Bazaar refresh failed", e);
+                ModConstants.LOGGER.error("Bazaar snapshot fetch failed", e);
+            } catch (Throwable t) {
+                ModConstants.LOGGER.error("Bazaar snapshot fetch failed", t);
             }
         }
 
-        private void fetchAuctionPriceFor(String displayName) {
-            String apiKey = SkywaveConfig.get().hypixelApiKey;
-            if (apiKey == null || apiKey.isEmpty()) return;
+        private void refreshItemsIndex(boolean force) {
+            long now = System.currentTimeMillis();
+            if (!force && (now - itemsIndexFetchedAt) < ITEMS_TTL_MS && !rarityColorByBaseName.isEmpty()) return;
+
             try {
-                String url = "https://api.hypixel.net/v2/skyblock/auctions?key=" + apiKey + "&page=0";
+                // This endpoint is accessible without an API key.
+                String url = "https://api.hypixel.net/v2/resources/skyblock/items";
                 HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().timeout(Duration.ofSeconds(12)).build();
                 HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
                 if (resp.statusCode() != 200) return;
-                JsonObject root = JsonParser.parseString(resp.body()).getAsJsonObject();
-                if (!root.has("auctions")) return;
-                double lowest = 0.0;
-                for (var elem : root.getAsJsonArray("auctions")) {
-                    JsonObject auction = elem.getAsJsonObject();
-                    if (!auction.has("bin") || !auction.get("bin").getAsBoolean()) continue;
-                    if (!auction.has("item_name") || !auction.has("starting_bid")) continue;
-                    String name = auction.get("item_name").getAsString();
-                    if (!name.equalsIgnoreCase(displayName)) continue;
-                    double bid = auction.get("starting_bid").getAsDouble();
-                    if (lowest <= 0 || bid < lowest) lowest = bid;
-                }
-                auctionPriceCache.put(displayName, lowest);
-                auctionCacheTime.put(displayName, System.currentTimeMillis());
-            } catch (IOException | InterruptedException e) {
-                ModConstants.LOGGER.error("Auction price fetch failed for '{}'", displayName, e);
-            }
-        }
 
-        private double extractPriceFromProduct(JsonObject prod) {
-            if (prod == null) return 0.0;
-            if (!prod.has("quick_status")) return 0.0;
-            JsonObject status = prod.getAsJsonObject("quick_status");
-            if (status.has("sellPrice")) {
-                return Math.max(0.0, status.get("sellPrice").getAsDouble());
-            }
-            if (status.has("buyPrice")) {
-                return Math.max(0.0, status.get("buyPrice").getAsDouble());
-            }
-            return 0.0;
-        }
-
-        private void buildItemsIndexIfNeeded(boolean force) {
-            long now = System.currentTimeMillis();
-            if (!force && (now - itemsIndexFetchedAt) < ITEMS_TTL_MS && !nameToProductId.isEmpty()) return;
-            String apiKey = SkywaveConfig.get().hypixelApiKey;
-            if (apiKey == null || apiKey.isEmpty()) return;
-            try {
-                String url = "https://api.hypixel.net/v2/resources/skyblock/items?key=" + apiKey;
-                HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().timeout(Duration.ofSeconds(10)).build();
-                HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-                if (resp.statusCode() != 200) return;
                 JsonObject root = JsonParser.parseString(resp.body()).getAsJsonObject();
+                if (root.has("success") && !root.get("success").getAsBoolean()) return;
                 if (!root.has("items")) return;
+
                 JsonArray items = root.getAsJsonArray("items");
-                nameToProductId.clear();
-                normalizedNameToId.clear();
+                rarityColorByBaseName.clear();
                 for (int i = 0; i < items.size(); i++) {
                     JsonObject obj = items.get(i).getAsJsonObject();
-                    if (!obj.has("id") || !obj.has("name")) continue;
-                    String id = obj.get("id").getAsString();
+                    if (obj == null || !obj.has("name")) continue;
                     String name = obj.get("name").getAsString();
-                    nameToProductId.put(name, id);
-                    normalizedNameToId.put(normalizeLookup(name), id);
+                    if (name == null || name.isBlank()) continue;
+                    if (!(name.endsWith(" Shard") || name.endsWith(" Shards"))) continue;
+                    if (!obj.has("tier")) continue;
+                    String tier = obj.get("tier").getAsString();
+                    String base = name.replaceFirst("(?i)\\s*Shards?$", "").trim();
+                    if (base.isEmpty()) continue;
+                    rarityColorByBaseName.put(base, tierToColorCode(tier));
                 }
+
                 itemsIndexFetchedAt = now;
             } catch (IOException | InterruptedException e) {
-                ModConstants.LOGGER.error("Item index fetch failed", e);
+                ModConstants.LOGGER.error("SkyBlock items index fetch failed", e);
+            } catch (Throwable t) {
+                ModConstants.LOGGER.error("SkyBlock items index fetch failed", t);
             }
         }
 
-        private String findProductIdFor(String displayName) {
-            if (displayName == null) return null;
+        private String resolveBazaarProductId(String baseName) {
+            if (baseName == null || baseName.isBlank()) return null;
+            String cached = baseNameToProductId.get(baseName);
+            if (cached != null) return cached;
 
-            // direct exact name match first
-            String direct = nameToProductId.get(displayName);
-            if (direct != null) return direct;
+            // Require a snapshot so we know the actual product ids that exist.
+            ensureBazaarSnapshotFresh();
+            if (buyPriceByProductId.isEmpty() && sellPriceByProductId.isEmpty()) {
+                // snapshot not ready yet
+                return null;
+            }
 
-            String normalized = normalizeLookup(displayName);
+            String token = baseName.toUpperCase().replaceAll("[^A-Z0-9]+", "_");
+            String[] candidates = new String[]{
+                    token + "_SHARD",
+                    "SHARD_" + token,
+                    token,
+                    token + "_SHARDS"
+            };
 
-            // direct normalized match
-            String mapped = normalizedNameToId.get(normalized);
-            if (mapped != null) return mapped;
-
-            // Fallback: try fuzzy contains / startsWith matches against the normalized index
-            // (this helps when displayName variants don't exactly match Hypixel item names)
-            for (var entry : normalizedNameToId.entrySet()) {
-                String key = entry.getKey();
-                if (key == null) continue;
-                if (key.contains(normalized) || normalized.contains(key)
-                        || key.startsWith(normalized) || normalized.startsWith(key)) {
-                    return entry.getValue();
+            for (String cand : candidates) {
+                if (buyPriceByProductId.containsKey(cand) || sellPriceByProductId.containsKey(cand)) {
+                    baseNameToProductId.put(baseName, cand);
+                    return cand;
                 }
             }
-            // last-ditch guess using typical Hypixel product id naming convention, e.g.
-            // displayName "Night Squid" -> "SHARD_NIGHT_SQUID"
-            return "SHARD_" + displayName.toUpperCase().replaceAll("[^A-Z0-9]+", "_");
+
+            // Fallback: scan for a shard product containing the token (rare, but helps with naming edge-cases).
+            String best = null;
+            for (String id : buyPriceByProductId.keySet()) {
+                if (id == null) continue;
+                if (!id.contains(token)) continue;
+                if (id.contains("SHARD")) {
+                    best = id;
+                    break;
+                }
+                if (best == null) best = id;
+            }
+            if (best != null) {
+                baseNameToProductId.put(baseName, best);
+                return best;
+            }
+
+            long now = System.currentTimeMillis();
+            Long last = missingIdLogTime.get(baseName);
+            if (last == null || (now - last) > MISSING_ID_LOG_COOLDOWN_MS) {
+                ModConstants.LOGGER.warn("Bazaar: no product id match for '{}'", baseName);
+                missingIdLogTime.put(baseName, now);
+            }
+
+            return null;
         }
 
-        private String normalizeLookup(String name) {
-            if (name == null) return "";
-            // Lowercase and remove non-alphanumerics; keep a compact representation for matching
-            return name.toLowerCase().replaceAll("[^a-z0-9]", "");
+        private String tierToColorCode(String tier) {
+            if (tier == null) return "§f";
+            return switch (tier.toUpperCase()) {
+                case "COMMON" -> "§f";
+                case "UNCOMMON" -> "§a";
+                case "RARE" -> "§9";
+                case "EPIC" -> "§5";
+                case "LEGENDARY" -> "§6";
+                case "MYTHIC" -> "§d";
+                case "SUPREME" -> "§4";
+                case "SPECIAL" -> "§c";
+                case "VERY_SPECIAL" -> "§d";
+                default -> "§f";
+            };
         }
     }
 }
