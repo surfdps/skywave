@@ -11,6 +11,11 @@ import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ChatScreen;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.text.Style;
+import net.minecraft.text.Text;
+import net.minecraft.text.TextColor;
+import net.minecraft.text.MutableText;
+import net.minecraft.util.Formatting;
 import org.wxter.skywave.ModConstants;
 import org.lwjgl.glfw.GLFW;
 import org.wxter.skywave.client.HypixelSkyblockContext;
@@ -25,10 +30,11 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Executors;
@@ -46,10 +52,14 @@ public class HuntingProfitTracker {
     private static final int MUTED_COLOR = 0xFFB0B0B0;
     private static final int DANGER_COLOR = 0xFFFF5555;
     private static final int SUCCESS_COLOR = 0xFF55FF55;
+    private static final int LOOTSHARE_TAG_COLOR = 0xFF555555;
+    private static final int YELLOW_ORANGE_COLOR = 0xFFFFAA00;
 
     private final ItemTrackerState trackerState = new ItemTrackerState(new HuntingStorage());
     private final List<ClickableRegion> clickRegions = new ArrayList<>();
     private final ConcurrentHashMap<String, Long> highlightUntilByKey = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Integer> lastSeenRarityRgbByBaseName = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Integer> lastSeenRarityWeightByBaseName = new ConcurrentHashMap<>();
 
     private static final int MAX_VISIBLE_ITEM_LINES = 6;
     private int itemScrollOffset = 0;
@@ -91,6 +101,8 @@ public class HuntingProfitTracker {
     }
 
     public void init() {
+        seedRarityCacheFromConfig();
+
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             try {
                 if (message != null) handleChatMessage(message.getString());
@@ -140,7 +152,30 @@ public class HuntingProfitTracker {
         String plain = stripColorCodes(raw).trim();
         if (plain.isEmpty()) return;
 
-        boolean lootshare = plain.toLowerCase().contains("loot share");
+        boolean hasFormatting = raw.indexOf('\u00A7') >= 0;
+        boolean isBeaconRewardShardLine = isBeaconRewardShardLine(plain);
+
+        // Only parse system-like shard messages that come with legacy formatting codes,
+        // OR indented beacon reward lines (which are plain text).
+        if (!hasFormatting && !isBeaconRewardShardLine) return;
+
+        String lower = plain.toLowerCase();
+        boolean lootshare = containsLootshare(lower);
+
+        boolean isSentToBoxLine = lower.startsWith("you sent") && lower.contains("hunting box");
+        if (isSentToBoxLine && !cfg.countSentToHuntingBox) return;
+
+        // Extra guard: only parse the standard system shard messages, lootshare lines, or beacon reward shard lines.
+        if (!plain.startsWith("You ") && !lootshare && !isBeaconRewardShardLine) return;
+
+        if (isSentToBoxLine && cfg.countSentToHuntingBox) {
+            ParsedResult sent = parseSentToHuntingBox(plain);
+            if (sent != null) {
+                updateLastSeenRarityFromRaw(raw, sent.name);
+                recordShard(sent.name, sent.count, false);
+                return;
+            }
+        }
 
         boolean matched = false;
         for (String pat : cfg.chatPatterns) {
@@ -150,6 +185,7 @@ public class HuntingProfitTracker {
                 if (m.find()) {
                     ParsedResult r = parseFromMatcher(m, plain);
                     if (r != null) {
+                        updateLastSeenRarityFromRaw(raw, r.name);
                         recordShard(r.name, r.count, lootshare);
                         matched = true;
                         break;
@@ -159,14 +195,167 @@ public class HuntingProfitTracker {
             }
         }
 
-        if (!matched && plain.toLowerCase().contains("shard")) {
+        if (!matched && lower.contains("shard")) {
             ParsedResult r = parseByProximity(plain);
-            if (r != null) recordShard(r.name, r.count, lootshare);
+            if (r != null) {
+                updateLastSeenRarityFromRaw(raw, r.name);
+                recordShard(r.name, r.count, lootshare);
+            }
         }
     }
 
     private String stripColorCodes(String s) {
         return s == null ? "" : s.replaceAll("\u00A7.", "");
+    }
+
+    private boolean containsLootshare(String lowerPlain) {
+        if (lowerPlain == null || lowerPlain.isEmpty()) return false;
+        if (lowerPlain.contains("loot share")) return true;
+        if (lowerPlain.contains("lootshare")) return true;
+        return lowerPlain.replace(" ", "").contains("lootshare");
+    }
+
+    private void updateLastSeenRarityFromRaw(String rawWithCodes, String parsedName) {
+        if (rawWithCodes == null || rawWithCodes.isEmpty()) return;
+        if (parsedName == null || parsedName.isBlank()) return;
+
+        Character code = findLastColorCodeBeforeName(rawWithCodes, parsedName);
+        if (code == null) return;
+
+        String baseName = normalizeName(parsedName);
+        if (baseName == null || baseName.isBlank()) return;
+
+        Integer rgb = minecraftColorCodeToRgb(code);
+        if (rgb != null) {
+            lastSeenRarityRgbByBaseName.put(baseName, rgb);
+        }
+
+        Integer weight = minecraftColorCodeToRarityWeight(code);
+        if (weight != null) {
+            lastSeenRarityWeightByBaseName.put(baseName, weight);
+        }
+
+        boolean changed = false;
+        SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
+        if (cfg != null) {
+            if (rgb != null) {
+                Integer prev = cfg.shardRarityRgb.get(baseName);
+                if (prev == null || !prev.equals(rgb)) {
+                    cfg.shardRarityRgb.put(baseName, rgb);
+                    changed = true;
+                }
+            }
+            if (weight != null) {
+                Integer prevW = cfg.shardRarityWeight.get(baseName);
+                if (prevW == null || !prevW.equals(weight)) {
+                    cfg.shardRarityWeight.put(baseName, weight);
+                    changed = true;
+                }
+            }
+        }
+        if (changed) {
+            SkywaveConfig.save();
+        }
+    }
+
+    private void seedRarityCacheFromConfig() {
+        try {
+            SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
+            if (cfg == null) return;
+            if (cfg.shardRarityRgb != null && !cfg.shardRarityRgb.isEmpty()) {
+                lastSeenRarityRgbByBaseName.putAll(cfg.shardRarityRgb);
+            }
+            if (cfg.shardRarityWeight != null && !cfg.shardRarityWeight.isEmpty()) {
+                lastSeenRarityWeightByBaseName.putAll(cfg.shardRarityWeight);
+            }
+        } catch (Throwable t) {
+            ModConstants.LOGGER.warn("Failed to seed shard rarity cache from config", t);
+        }
+    }
+
+    private Character findLastColorCodeBeforeName(String rawWithCodes, String parsedName) {
+        String rawLower = rawWithCodes.toLowerCase(Locale.ROOT);
+        String nameLower = parsedName.toLowerCase(Locale.ROOT);
+        int idx = rawLower.indexOf(nameLower);
+        if (idx < 0) return null;
+
+        for (int i = idx - 2; i >= 0; i--) {
+            if (rawWithCodes.charAt(i) != '\u00A7') continue;
+            if (i + 1 >= rawWithCodes.length()) continue;
+            char code = Character.toLowerCase(rawWithCodes.charAt(i + 1));
+            if (minecraftColorCodeToRgb(code) != null) return code;
+        }
+
+        return null;
+    }
+
+    private Integer minecraftColorCodeToRgb(char code) {
+        return switch (Character.toLowerCase(code)) {
+            case '0' -> 0x000000; // black
+            case '1' -> 0x0000AA; // dark blue
+            case '2' -> 0x00AA00; // dark green
+            case '3' -> 0x00AAAA; // dark aqua
+            case '4' -> 0xAA0000; // dark red
+            case '5' -> 0xAA00AA; // dark purple
+            case '6' -> 0xFFAA00; // gold
+            case '7' -> 0xAAAAAA; // gray
+            case '8' -> 0x555555; // dark gray
+            case '9' -> 0x5555FF; // blue
+            case 'a' -> 0x55FF55; // green
+            case 'b' -> 0x55FFFF; // aqua
+            case 'c' -> 0xFF5555; // red
+            case 'd' -> 0xFF55FF; // light purple
+            case 'e' -> 0xFFFF55; // yellow
+            case 'f' -> 0xFFFFFF; // white
+            default -> null;
+        };
+    }
+
+    private Integer minecraftColorCodeToRarityWeight(char code) {
+        return switch (Character.toLowerCase(code)) {
+            case 'f' -> 1; // Common
+            case 'a' -> 2; // Uncommon
+            case '9' -> 3; // Rare
+            case '5' -> 4; // Epic
+            case '6' -> 5; // Legendary
+            case 'd' -> 6; // Mythic
+            case 'b' -> 7; // Divine
+            case 'c' -> 8; // Special
+            default -> null;
+        };
+    }
+
+    private boolean isBeaconRewardShardLine(String plain) {
+        if (plain == null) return false;
+        // Beacon rewards are displayed as indented lines, e.g. "     Beaconmite Shard x2"
+        return plain.matches("(?i)^\\s{2,}.+\\s+Shards?\\s+x\\d+\\s*!?\\s*$");
+    }
+
+    private ParsedResult parseSentToHuntingBox(String plain) {
+        if (plain == null) return null;
+        // Examples (after stripping codes):
+        // "You sent a Draconic Shard to your Hunting Box."
+        // "You sent 25 XYZ Shards to your Hunting Box."
+        Pattern p = Pattern.compile("(?i)^You\\s+sent\\s+(?:a\\s+)?(?:x\\s*)?(?:(\\d+)\\s+)?(.+?)\\s+Shards?\\s+to\\s+your\\s+Hunting\\s+Box[.!]?\\s*$");
+        Matcher m = p.matcher(plain.trim());
+        if (!m.find()) return null;
+
+        int count = 1;
+        String cnt = m.group(1);
+        if (cnt != null && !cnt.isBlank()) {
+            try {
+                count = Integer.parseInt(cnt.trim());
+            } catch (NumberFormatException ignored) {
+                count = 1;
+            }
+        }
+
+        String name = m.group(2);
+        if (name == null) return null;
+        name = name.trim();
+        if (name.isEmpty()) return null;
+
+        return new ParsedResult(name, Math.max(1, count));
     }
 
     private static class ParsedResult {
@@ -419,7 +608,7 @@ public class HuntingProfitTracker {
             int width = 0;
             if (line.text != null && !line.text.isEmpty()) {
                 if (line.kind == DisplayLine.Kind.ITEM) {
-                    int nameW = tr.getWidth(line.itemNameText);
+                    int nameW = line.itemName == null ? 0 : tr.getWidth(line.itemName);
                     width = maxCountCol + gap + nameW + gap + maxPriceCol;
                 } else {
                     width = tr.getWidth(line.text);
@@ -461,7 +650,7 @@ public class HuntingProfitTracker {
                     } else {
                         countText = "§7" + countText + "§r";
                     }
-                    String nameText = line.itemNameText;
+                    Text nameText = line.itemName == null ? Text.empty() : line.itemName;
                     String priceText = "§6" + line.itemPriceText + "§r";
 
                     int countW = tr.getWidth(line.itemCountText);
@@ -507,48 +696,115 @@ public class HuntingProfitTracker {
         lines.add(DisplayLine.simple("§lHunting Profit Tracker:§r", TITLE_COLOR));
         lines.add(DisplayLine.spacer(4));
 
-        Map<String, Long> counts = trackerState.getCounts(cfg.displayMode);
-        if (counts.isEmpty()) {
+        Map<String, Long> rawCountsRef = trackerState.getCounts(cfg.displayMode);
+        Map<String, Long> rawCounts = rawCountsRef == null ? Collections.emptyMap() : new HashMap<>(rawCountsRef);
+        if (rawCounts.isEmpty()) {
             lines.add(DisplayLine.simple("No shards yet", MUTED_COLOR));
         } else {
-            Map<String, Long> sorted = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-            sorted.putAll(counts);
+            Map<String, Boolean> mergedFlashByBaseName = null;
+            Map<String, Long> counts = rawCounts;
+            if (!cfg.showLootshareShards) {
+                mergedFlashByBaseName = new ConcurrentHashMap<>();
+                Map<String, Long> merged = new ConcurrentHashMap<>();
+                long nowForFlash = System.currentTimeMillis();
+                for (Map.Entry<String, Long> e : rawCounts.entrySet()) {
+                    String rawKey = e.getKey();
+                    long cnt = e.getValue();
+                    if (rawKey == null || rawKey.isBlank() || cnt <= 0) continue;
+                    String baseName = rawKey.endsWith(KEY_LOOTSHARE_SUFFIX)
+                            ? rawKey.substring(0, rawKey.length() - KEY_LOOTSHARE_SUFFIX.length())
+                            : rawKey;
+                    if (baseName.isBlank()) continue;
+                    merged.merge(baseName, cnt, Long::sum);
+                    boolean flash = (highlightUntilByKey.getOrDefault(rawKey, 0L) > nowForFlash);
+                    if (flash) mergedFlashByBaseName.put(baseName, true);
+                }
+                counts = merged;
+            }
 
             double totalCoins = 0.0;
             boolean hasAnyPrice = false;
             List<DisplayLine> itemLines = new ArrayList<>();
             long now = System.currentTimeMillis();
 
-            for (Map.Entry<String, Long> e : sorted.entrySet()) {
+            record ItemEntry(
+                    String rawKey,
+                    String baseName,
+                    boolean lootshare,
+                    long count,
+                    boolean flash,
+                    double unitPrice,
+                    boolean hasPrice,
+                    double profit,
+                    int rarityWeight,
+                    int rarityRgb
+            ) {}
+
+            List<ItemEntry> entries = new ArrayList<>();
+            for (Map.Entry<String, Long> e : counts.entrySet()) {
                 String rawKey = e.getKey();
                 long cnt = e.getValue();
                 if (rawKey == null || rawKey.isBlank() || cnt <= 0) continue;
 
-                boolean lootshare = rawKey.endsWith(KEY_LOOTSHARE_SUFFIX);
-                String baseName = lootshare ? rawKey.substring(0, rawKey.length() - KEY_LOOTSHARE_SUFFIX.length()) : rawKey;
+                boolean lootshare = cfg.showLootshareShards && rawKey.endsWith(KEY_LOOTSHARE_SUFFIX);
+                String baseName = lootshare
+                        ? rawKey.substring(0, rawKey.length() - KEY_LOOTSHARE_SUFFIX.length())
+                        : rawKey;
                 if (baseName.isBlank()) continue;
 
                 double unit = cfg.showUnitPrices ? priceFetcher.getPriceFor(baseName, cfg.bazaarPriceMode) : 0.0;
                 boolean hasPrice = unit > 0;
-                if (hasPrice) {
+                double profit = hasPrice ? (unit * cnt) : 0.0;
+
+                boolean flash = (mergedFlashByBaseName != null)
+                        ? mergedFlashByBaseName.getOrDefault(baseName, false)
+                        : (highlightUntilByKey.getOrDefault(rawKey, 0L) > now);
+
+                int rarityRgb = lastSeenRarityRgbByBaseName.getOrDefault(baseName, getSavedRarityRgb(baseName, priceFetcher.getRarityRgb(baseName)));
+                int rarityWeight = lastSeenRarityWeightByBaseName.getOrDefault(baseName, getSavedRarityWeight(baseName, priceFetcher.getRarityWeight(baseName)));
+
+                entries.add(new ItemEntry(rawKey, baseName, lootshare, cnt, flash, unit, hasPrice, profit, rarityWeight, rarityRgb));
+            }
+
+            SkywaveConfig.HuntingSortMode sortMode = cfg.sortMode == null ? SkywaveConfig.HuntingSortMode.PROFIT : cfg.sortMode;
+            if (!cfg.showUnitPrices && sortMode == SkywaveConfig.HuntingSortMode.PROFIT) {
+                sortMode = SkywaveConfig.HuntingSortMode.RARITY;
+            }
+
+            SkywaveConfig.HuntingSortMode effectiveSortMode = sortMode;
+            entries.sort((a, b) -> {
+                int c;
+                if (effectiveSortMode == SkywaveConfig.HuntingSortMode.RARITY) {
+                    c = Integer.compare(b.rarityWeight(), a.rarityWeight());
+                    if (c != 0) return c;
+                    c = Double.compare(b.profit(), a.profit());
+                    if (c != 0) return c;
+                } else {
+                    c = Double.compare(b.profit(), a.profit());
+                    if (c != 0) return c;
+                    c = Integer.compare(b.rarityWeight(), a.rarityWeight());
+                    if (c != 0) return c;
+                }
+
+                c = a.baseName().compareToIgnoreCase(b.baseName());
+                if (c != 0) return c;
+                return Boolean.compare(b.lootshare(), a.lootshare());
+            });
+
+            for (ItemEntry it : entries) {
+                if (it.hasPrice()) {
                     hasAnyPrice = true;
-                    totalCoins += unit * cnt;
+                    totalCoins += it.profit();
                 }
 
-                boolean flash = (highlightUntilByKey.getOrDefault(rawKey, 0L) > now);
-                String countText = "x" + cnt;
-
-                String rarity = priceFetcher.getRarityColorCode(baseName);
-                String name = rarity + baseName + "§r §7Shard§r";
-                if (lootshare) {
-                    name += " §8Lootshare§r";
-                }
+                String countText = "x" + it.count();
+                Text name = buildShardNameText(it.baseName(), it.lootshare(), it.rarityRgb());
 
                 String right = cfg.showUnitPrices
-                        ? (hasPrice ? formatCoinsShort(unit * cnt) : "??")
-                        : String.valueOf(cnt);
+                        ? (it.hasPrice() ? formatCoinsShort(it.profit()) : "??")
+                        : String.valueOf(it.count());
 
-                itemLines.add(DisplayLine.itemRow(countText, flash, name, right));
+                itemLines.add(DisplayLine.itemRow(countText, it.flash(), name, right));
             }
 
             // collapse/scroll if too many items
@@ -560,7 +816,7 @@ public class HuntingProfitTracker {
                 int start = itemScrollOffset;
                 int end = Math.min(itemLines.size(), itemScrollOffset + MAX_VISIBLE_ITEM_LINES);
                 lines.addAll(itemLines.subList(start, end));
-                lines.add(DisplayLine.simple("§oMore items (scroll)§r", MUTED_COLOR));
+                lines.add(DisplayLine.simple("§oMore items (scroll)§r", LOOTSHARE_TAG_COLOR));
             } else {
                 lines.addAll(itemLines);
             }
@@ -568,11 +824,18 @@ public class HuntingProfitTracker {
             lines.add(DisplayLine.spacer(4));
 
             if (cfg.showUnitPrices) {
-                String totalProfit = "Total Profit: " + (hasAnyPrice ? formatCoinsLong(totalCoins) + " coins" : "??");
-                lines.add(DisplayLine.simple(totalProfit, SUCCESS_COLOR));
+                DisplayLine profitLine = new DisplayLine("Total Profit: ", SUCCESS_COLOR, null);
+                profitLine.suffixText = "§l" + (hasAnyPrice ? formatCoinsLong(totalCoins) : "??");
+                profitLine.suffixColor = YELLOW_ORANGE_COLOR;
+                lines.add(profitLine);
 
-                double coinsPerHour = getCoinsPerHourCached(totalCoins);
-                lines.add(DisplayLine.simple("Coins/h: " + formatCoinsLong(coinsPerHour), coinsPerHourColor(coinsPerHour)));
+                if (cfg.displayMode == SkywaveConfig.DisplayMode.SESSION) {
+                    double coinsPerHour = getCoinsPerHourCached(totalCoins);
+                    DisplayLine cphLine = new DisplayLine("§oCoins/h: §r", MUTED_COLOR, null);
+                    cphLine.suffixText = "§o" + formatCoinsLong(coinsPerHour) + "§r";
+                    cphLine.suffixColor = coinsPerHourColor(coinsPerHour);
+                    lines.add(cphLine);
+                }
             } else {
                 long totalShards = counts.values().stream().mapToLong(Long::longValue).sum();
                 lines.add(DisplayLine.simple("Total shards: " + totalShards, SUCCESS_COLOR));
@@ -584,8 +847,10 @@ public class HuntingProfitTracker {
         }
 
         if (cfg.showTimer) {
+            lines.add(DisplayLine.spacer(4));
+
             String timerValue = getSessionUptimeFormatted();
-            boolean paused = trackerState.isTimerPaused();
+            boolean paused = trackerState.isRunning() && trackerState.isTimerPaused();
 
             StringBuilder timerText = new StringBuilder("Timer: ").append(timerValue);
             if (paused) timerText.append(" §cPaused§r");
@@ -654,6 +919,33 @@ public class HuntingProfitTracker {
         if (v >= 1_000_000) return String.format("%,.2fM", v / 1_000_000.0);
         if (v >= 1_000) return String.format("%,.2fK", v / 1_000.0);
         return String.format("%,.0f", v);
+    }
+
+    private Text buildShardNameText(String baseName, boolean lootshare, int rarityRgb) {
+        String safeName = baseName == null ? "" : baseName;
+        TextColor color = TextColor.fromRgb(rarityRgb & 0xFFFFFF);
+        MutableText out = Text.literal(safeName).setStyle(Style.EMPTY.withColor(color))
+                .append(Text.literal(" Shard").formatted(Formatting.GRAY));
+
+        if (lootshare) {
+            out = out.append(Text.literal(" LS").formatted(Formatting.DARK_GRAY));
+        }
+
+        return out;
+    }
+
+    private int getSavedRarityRgb(String baseName, int fallback) {
+        SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
+        if (cfg == null || cfg.shardRarityRgb == null || baseName == null) return fallback;
+        Integer v = cfg.shardRarityRgb.get(baseName);
+        return v == null ? fallback : v;
+    }
+
+    private int getSavedRarityWeight(String baseName, int fallback) {
+        SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
+        if (cfg == null || cfg.shardRarityWeight == null || baseName == null) return fallback;
+        Integer v = cfg.shardRarityWeight.get(baseName);
+        return v == null ? fallback : v;
     }
 
     private double getCoinsPerHourCached(double totalCoins) {
@@ -727,10 +1019,6 @@ public class HuntingProfitTracker {
         SkywaveConfig.save();
     }
 
-    public void clientTick() {
-        // reserved for future use
-    }
-
     private static final class DisplayLine {
         enum Kind { TEXT, ITEM }
 
@@ -746,7 +1034,7 @@ public class HuntingProfitTracker {
 
         // ITEM fields (rendered via drawHud custom columns)
         String itemCountText;
-        String itemNameText;
+        Text itemName;
         String itemPriceText;
         boolean itemCountFlash;
 
@@ -761,7 +1049,7 @@ public class HuntingProfitTracker {
             this.suffixColor2 = color;
             this.extraSpacingAfter = 0;
             this.itemCountText = null;
-            this.itemNameText = null;
+            this.itemName = null;
             this.itemPriceText = null;
             this.itemCountFlash = false;
         }
@@ -787,11 +1075,11 @@ public class HuntingProfitTracker {
             return line;
         }
 
-        static DisplayLine itemRow(String countText, boolean flash, String nameText, String priceText) {
+        static DisplayLine itemRow(String countText, boolean flash, Text nameText, String priceText) {
             DisplayLine line = new DisplayLine(Kind.ITEM, "__ITEM__", 0xFFFFFFFF, null);
             line.itemCountText = countText == null ? "" : countText;
             line.itemCountFlash = flash;
-            line.itemNameText = nameText == null ? "" : nameText;
+            line.itemName = nameText == null ? Text.empty() : nameText;
             line.itemPriceText = priceText == null ? "" : priceText;
             return line;
         }
@@ -848,7 +1136,8 @@ public class HuntingProfitTracker {
         private volatile long bazaarSnapshotFetchedAt = 0L;
         private volatile boolean bazaarSnapshotRefreshQueued = false;
 
-        private final ConcurrentHashMap<String, String> rarityColorByBaseName = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Integer> rarityRgbByBaseName = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Integer> rarityWeightByBaseName = new ConcurrentHashMap<>();
         private volatile long itemsIndexFetchedAt = 0L;
         private volatile boolean itemsIndexRefreshQueued = false;
 
@@ -868,10 +1157,16 @@ public class HuntingProfitTracker {
             return buyPriceByProductId.getOrDefault(productId, 0.0);
         }
 
-        public String getRarityColorCode(String baseName) {
-            if (baseName == null || baseName.isBlank()) return "§f";
+        public int getRarityRgb(String baseName) {
+            if (baseName == null || baseName.isBlank()) return 0xFFFFFF;
             ensureItemsIndexFresh();
-            return rarityColorByBaseName.getOrDefault(baseName, "§f");
+            return rarityRgbByBaseName.getOrDefault(baseName, 0xFFFFFF);
+        }
+
+        public int getRarityWeight(String baseName) {
+            if (baseName == null || baseName.isBlank()) return 0;
+            ensureItemsIndexFresh();
+            return rarityWeightByBaseName.getOrDefault(baseName, 0);
         }
 
         public void refreshAll() {
@@ -899,7 +1194,7 @@ public class HuntingProfitTracker {
 
         private void ensureItemsIndexFresh() {
             long now = System.currentTimeMillis();
-            if ((now - itemsIndexFetchedAt) < ITEMS_TTL_MS && !rarityColorByBaseName.isEmpty()) return;
+            if ((now - itemsIndexFetchedAt) < ITEMS_TTL_MS && !rarityRgbByBaseName.isEmpty()) return;
             if (itemsIndexRefreshQueued) return;
             itemsIndexRefreshQueued = true;
             scheduler.execute(() -> {
@@ -949,7 +1244,7 @@ public class HuntingProfitTracker {
 
         private void refreshItemsIndex(boolean force) {
             long now = System.currentTimeMillis();
-            if (!force && (now - itemsIndexFetchedAt) < ITEMS_TTL_MS && !rarityColorByBaseName.isEmpty()) return;
+            if (!force && (now - itemsIndexFetchedAt) < ITEMS_TTL_MS && !rarityRgbByBaseName.isEmpty()) return;
 
             try {
                 // This endpoint is accessible without an API key.
@@ -963,18 +1258,30 @@ public class HuntingProfitTracker {
                 if (!root.has("items")) return;
 
                 JsonArray items = root.getAsJsonArray("items");
-                rarityColorByBaseName.clear();
+                rarityRgbByBaseName.clear();
+                rarityWeightByBaseName.clear();
                 for (int i = 0; i < items.size(); i++) {
                     JsonObject obj = items.get(i).getAsJsonObject();
                     if (obj == null || !obj.has("name")) continue;
                     String name = obj.get("name").getAsString();
                     if (name == null || name.isBlank()) continue;
                     if (!(name.endsWith(" Shard") || name.endsWith(" Shards"))) continue;
-                    if (!obj.has("tier")) continue;
-                    String tier = obj.get("tier").getAsString();
                     String base = name.replaceFirst("(?i)\\s*Shards?$", "").trim();
                     if (base.isEmpty()) continue;
-                    rarityColorByBaseName.put(base, tierToColorCode(tier));
+
+                    String tier = obj.has("tier") ? obj.get("tier").getAsString() : null;
+
+                    Integer rgb = null;
+                    if (obj.has("color")) {
+                        try {
+                            rgb = hypixelColorToRgb(obj.get("color").getAsString());
+                        } catch (Throwable ignored) {}
+                    }
+                    if (rgb == null) rgb = tierToRgb(tier);
+                    if (rgb == null) rgb = 0xFFFFFF;
+
+                    rarityRgbByBaseName.put(base, rgb);
+                    rarityWeightByBaseName.put(base, tierToWeight(tier));
                 }
 
                 itemsIndexFetchedAt = now;
@@ -1038,19 +1345,64 @@ public class HuntingProfitTracker {
             return null;
         }
 
-        private String tierToColorCode(String tier) {
-            if (tier == null) return "§f";
+        private Integer tierToRgb(String tier) {
+            if (tier == null) return null;
             return switch (tier.toUpperCase()) {
-                case "COMMON" -> "§f";
-                case "UNCOMMON" -> "§a";
-                case "RARE" -> "§9";
-                case "EPIC" -> "§5";
-                case "LEGENDARY" -> "§6";
-                case "MYTHIC" -> "§d";
-                case "SUPREME" -> "§4";
-                case "SPECIAL" -> "§c";
-                case "VERY_SPECIAL" -> "§d";
-                default -> "§f";
+                case "COMMON" -> 0xFFFFFF;
+                case "UNCOMMON" -> 0x55FF55;
+                case "RARE" -> 0x5555FF;
+                case "EPIC" -> 0xAA00AA;
+                case "LEGENDARY" -> 0xFFAA00;
+                case "MYTHIC" -> 0xFF55FF;
+                case "DIVINE" -> 0x55FFFF;
+                case "SPECIAL", "VERY_SPECIAL", "SUPREME" -> 0xFF5555;
+                default -> 0xFFFFFF;
+            };
+        }
+
+        private int tierToWeight(String tier) {
+            if (tier == null) return 0;
+            return switch (tier.toUpperCase()) {
+                case "COMMON" -> 1;
+                case "UNCOMMON" -> 2;
+                case "RARE" -> 3;
+                case "EPIC" -> 4;
+                case "LEGENDARY" -> 5;
+                case "MYTHIC" -> 6;
+                case "DIVINE" -> 7;
+                case "SPECIAL", "VERY_SPECIAL", "SUPREME" -> 8;
+                default -> 0;
+            };
+        }
+
+        private Integer hypixelColorToRgb(String raw) {
+            if (raw == null) return null;
+            String s = raw.trim();
+            if (s.isEmpty()) return null;
+
+            if (s.matches("(?i)^#?[0-9a-f]{6}$")) {
+                String hex = s.startsWith("#") ? s.substring(1) : s;
+                try {
+                    return Integer.parseInt(hex, 16) & 0xFFFFFF;
+                } catch (NumberFormatException ignored) {
+                    return null;
+                }
+            }
+
+            return switch (s.toUpperCase().replace(' ', '_')) {
+                case "WHITE" -> 0xFFFFFF;
+                case "GREEN", "LIME" -> 0x55FF55;
+                case "BLUE" -> 0x5555FF;
+                case "PURPLE", "DARK_PURPLE" -> 0xAA00AA;
+                case "GOLD", "ORANGE" -> 0xFFAA00;
+                case "PINK", "LIGHT_PURPLE" -> 0xFF55FF;
+                case "AQUA", "CYAN" -> 0x55FFFF;
+                case "RED", "LIGHT_RED" -> 0xFF5555;
+                case "DARK_RED" -> 0xAA0000;
+                case "YELLOW" -> 0xFFFF55;
+                case "GRAY", "GREY" -> 0xAAAAAA;
+                case "DARK_GRAY", "DARK_GREY" -> 0x555555;
+                default -> null;
             };
         }
     }

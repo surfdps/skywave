@@ -32,6 +32,11 @@ public class SkywaveConfig {
         SELL_OFFER
     }
 
+    public enum HuntingSortMode {
+        PROFIT,
+        RARITY
+    }
+
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("skywave.json");
 
@@ -56,6 +61,14 @@ public class SkywaveConfig {
     public static class HuntingConfig {
         public boolean profitTrackerEnabled = false;
         public boolean showTimer = true;
+        /**
+         * If enabled, Lootshare shards are shown as separate lines (tagged "LS").
+         * If disabled, Lootshare shards are merged into the main shard totals.
+         */
+        public boolean showLootshareShards = true;
+        /** Count shards from "You sent ... to your Hunting Box" messages (can skew Coins/h). */
+        public boolean countSentToHuntingBox = false;
+        public HuntingSortMode sortMode = HuntingSortMode.PROFIT;
         public DisplayMode displayMode = DisplayMode.SESSION;
         public BazaarPriceMode bazaarPriceMode = BazaarPriceMode.BUY_OFFER;
 
@@ -63,8 +76,8 @@ public class SkywaveConfig {
                 // generic
                 "(?:You found|You received|You obtained|You got) .*Shard.* x?(\\d+)",
                 // loot share
-                "LOOT SHARE You received (\\d+) .+? Shards",
-                "LOOT SHARE You received (\\d+) .+? Shard",
+                "LOOT\\s*SHARE You received (\\d+) .+? Shards",
+                "LOOT\\s*SHARE You received (\\d+) .+? Shard",
                 // caught messages (handles x2 and 2)
                 "You caught x?(\\d+) .+? Shards",
                 "You caught ?(\\d+) .+? Shard",
@@ -81,6 +94,11 @@ public class SkywaveConfig {
 
         /** Optional per-item totals persisted */
         public Map<String, Long> huntingTotals = new HashMap<>();
+
+        /** Last-seen rarity color for shard base names (persisted across restarts). */
+        public Map<String, Integer> shardRarityRgb = new HashMap<>();
+        /** Last-seen rarity weight for shard base names (persisted across restarts). */
+        public Map<String, Integer> shardRarityWeight = new HashMap<>();
 
         /** Show unit prices on HUD (requires hypixelApiKey) */
         public boolean showUnitPrices = true;

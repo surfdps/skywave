@@ -9,16 +9,21 @@ import org.wxter.skywave.config.SkywaveConfig;
 public final class RainOverlayRenderer {
 
     private static volatile Text message = null;
-    private static volatile int remainingTicks = 0;
+    private static volatile long hideAtWorldTick = 0L;
 
     private static final int DEFAULT_TICKS = 240;
 
     // public для регистрации в HudRenderCallback
     public static void render(DrawContext ctx, RenderTickCounter tickDelta) {
-        if (message == null || remainingTicks <= 0) return;
-
         MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc == null) return;
+        if (mc == null || mc.world == null) return;
+
+        if (message == null) return;
+        if (hideAtWorldTick > 0 && mc.world.getTime() >= hideAtWorldTick) {
+            message = null;
+            hideAtWorldTick = 0L;
+            return;
+        }
 
         int screenW = mc.getWindow().getScaledWidth();
         int x = resolveHudX(screenW);
@@ -36,15 +41,18 @@ public final class RainOverlayRenderer {
         ctx.drawCenteredTextWithShadow(mc.textRenderer, message, scaledX, scaledY, color);
 
         ctx.getMatrices().popMatrix();
-
-        remainingTicks--;
-        if (remainingTicks <= 0) message = null;
     }
 
     public static void show(Text txt, int ticks) {
         if (txt == null) return;
         message = txt;
-        remainingTicks = ticks > 0 ? ticks : DEFAULT_TICKS;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc != null && mc.world != null) {
+            int dur = ticks > 0 ? ticks : DEFAULT_TICKS;
+            hideAtWorldTick = mc.world.getTime() + dur;
+        } else {
+            hideAtWorldTick = 0L;
+        }
     }
 
     public static void renderMovePreview(DrawContext ctx) {

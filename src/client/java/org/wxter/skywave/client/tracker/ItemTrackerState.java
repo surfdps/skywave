@@ -32,6 +32,9 @@ public class ItemTrackerState {
 
     public void stopSession() {
         running = false;
+        timerPaused = false;
+        pausedAtMillis = 0L;
+        accumulatedPausedMillis = 0L;
     }
 
     public void reset(SkywaveConfig.DisplayMode mode) {

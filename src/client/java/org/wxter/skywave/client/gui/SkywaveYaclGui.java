@@ -181,6 +181,19 @@ public class SkywaveYaclGui {
                                         .controller(opt -> EnumControllerBuilder.create(opt).enumClass(SkywaveConfig.BazaarPriceMode.class))
                                         .build())
 
+                                .option(Option.<SkywaveConfig.HuntingSortMode>createBuilder()
+                                        .name(Text.literal("Items Sorting"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "Choose how items are sorted in the tracker list.\n\nProfit: highest profit first.\nRarity: highest rarity first."
+                                        )))
+                                        .binding(
+                                                SkywaveConfig.HuntingSortMode.PROFIT,
+                                                () -> SkywaveConfig.get().hunting.sortMode,
+                                                v -> SkywaveConfig.get().hunting.sortMode = v
+                                        )
+                                        .controller(opt -> EnumControllerBuilder.create(opt).enumClass(SkywaveConfig.HuntingSortMode.class))
+                                        .build())
+
                                 .option(Option.<Boolean>createBuilder()
                                         .name(Text.literal("Show Timer"))
                                         .description(OptionDescription.of(Text.literal("Show session timer in tracker. Starting/Pausing manually in UI.")))
@@ -188,6 +201,33 @@ public class SkywaveYaclGui {
                                                 true,
                                                 () -> SkywaveConfig.get().hunting.showTimer,
                                                 v -> SkywaveConfig.get().hunting.showTimer = v
+                                        )
+                                        .controller(TickBoxControllerBuilder::create)
+                                        .build())
+
+                                .option(Option.<Boolean>createBuilder()
+                                        .name(Text.literal("Show Lootshare shards"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "Show Lootshare shards as separate lines (tagged \"LS\").\n\nIf disabled, Lootshare shards are merged into the main shard totals."
+                                        )))
+                                        .binding(
+                                                true,
+                                                () -> SkywaveConfig.get().hunting.showLootshareShards,
+                                                v -> SkywaveConfig.get().hunting.showLootshareShards = v
+                                        )
+                                        .controller(TickBoxControllerBuilder::create)
+                                        .build())
+
+                                .option(Option.<Boolean>createBuilder()
+                                        .name(Text.literal("Count “Sent to Hunting Box”"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "Count shards from messages like \"You sent ... to your Hunting Box\".\n\n" +
+                                                "This lets you track shards you manually add to the Hunting Box, but it may cause Coins/h to be calculated incorrectly."
+                                        )))
+                                        .binding(
+                                                false,
+                                                () -> SkywaveConfig.get().hunting.countSentToHuntingBox,
+                                                v -> SkywaveConfig.get().hunting.countSentToHuntingBox = v
                                         )
                                         .controller(TickBoxControllerBuilder::create)
                                         .build())
