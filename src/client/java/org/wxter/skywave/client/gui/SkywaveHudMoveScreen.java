@@ -28,7 +28,6 @@ public class SkywaveHudMoveScreen extends Screen {
 
         // Кнопка закрытия
         addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> {
-            HuntingProfitTracker.INSTANCE.disableMoveMode();
             MinecraftClient.getInstance().setScreen(parent);
         }).dimensions(centerX - 100, centerY + 50, 200, 20).build());
     }
@@ -49,7 +48,7 @@ public class SkywaveHudMoveScreen extends Screen {
         );
 
         // Рендер HUD поверх фона
-        HuntingProfitTracker.INSTANCE.onHudRender(ctx);
+        HuntingProfitTracker.INSTANCE.renderMovePreview(ctx);
         org.wxter.skywave.client.RainOverlayRenderer.renderMovePreview(ctx);
 
         // Кнопки поверх

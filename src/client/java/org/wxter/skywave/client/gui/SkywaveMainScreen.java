@@ -66,7 +66,7 @@ public class SkywaveMainScreen extends Screen {
 
         ctx.drawCenteredTextWithShadow(
                 this.textRenderer,
-                Text.literal("v1.2  •  by wxxve & eseoo").formatted(Formatting.GRAY),
+                Text.literal("v1.4  •  by wxxve & eseoo").formatted(Formatting.GRAY),
                 centerX,
                 titleY + 15,
                 0xFFB8B8B8

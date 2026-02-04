@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 public class SkywaveConfig {
 
@@ -35,6 +36,11 @@ public class SkywaveConfig {
     public enum HuntingSortMode {
         PROFIT,
         RARITY
+    }
+
+    public enum WaypointChatParseChannel {
+        ALL,
+        PARTY
     }
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -111,11 +117,94 @@ public class SkywaveConfig {
     public int bazaarRefreshMinutes = 1;
     // =======================
 
+    // ===== CRYSTAL NUCLEUS =====
+    public CrystalNucleusConfig crystalNucleus = new CrystalNucleusConfig();
+
+    public static class CrystalNucleusConfig {
+        public boolean jungleSkipWaypointsEnabled = false;
+    }
+    // ===========================
+
     // ===== HUD Positions =====
     /** Centered if negative; absolute screen x position otherwise. */
     public int rainReminderHudX = -1;
     public int rainReminderHudY = 80;
     // =========================
+
+    // ===== WAYPOINTS =====
+    public WaypointsConfig waypoints = new WaypointsConfig();
+
+    public static class WaypointsConfig {
+        public boolean enabled = false;
+        public boolean showDistance = true;
+        public boolean highlightBlockInFov = true;
+        public boolean onlySameDimension = true;
+
+        public boolean chatParsingEnabled = false;
+        public WaypointChatParseChannel chatParseChannel = WaypointChatParseChannel.ALL;
+
+        public String activePresetId = "default";
+        public List<WaypointPreset> presets = new ArrayList<>(List.of(WaypointPreset.defaultPreset()));
+
+        private void fixup() {
+            if (chatParseChannel == null) chatParseChannel = WaypointChatParseChannel.ALL;
+
+            if (presets == null) presets = new ArrayList<>();
+            if (presets.isEmpty()) presets.add(WaypointPreset.defaultPreset());
+
+            for (WaypointPreset preset : presets) {
+                if (preset == null) continue;
+                if (preset.id == null || preset.id.isBlank()) preset.id = UUID.randomUUID().toString();
+                if (preset.name == null || preset.name.isBlank()) preset.name = "Preset";
+                if (preset.waypoints == null) preset.waypoints = new ArrayList<>();
+                for (WaypointEntry wp : preset.waypoints) {
+                    if (wp == null) continue;
+                    if (wp.id == null || wp.id.isBlank()) wp.id = UUID.randomUUID().toString();
+                    if (wp.name == null || wp.name.isBlank()) wp.name = "Waypoint";
+                }
+            }
+
+            if (activePresetId == null || activePresetId.isBlank()) {
+                activePresetId = presets.getFirst().id;
+            }
+
+            boolean foundActive = false;
+            for (WaypointPreset preset : presets) {
+                if (preset != null && activePresetId.equals(preset.id)) {
+                    foundActive = true;
+                    break;
+                }
+            }
+            if (!foundActive) activePresetId = presets.getFirst().id;
+        }
+    }
+
+    public static class WaypointPreset {
+        public String id = "";
+        public String name = "Default";
+        public List<WaypointEntry> waypoints = new ArrayList<>();
+
+        public static WaypointPreset defaultPreset() {
+            WaypointPreset preset = new WaypointPreset();
+            preset.id = "default";
+            preset.name = "Default";
+            return preset;
+        }
+    }
+
+    public static class WaypointEntry {
+        public String id = "";
+        public String name = "Waypoint";
+        public int x = 0;
+        public int y = 0;
+        public int z = 0;
+        /** ARGB */
+        public int color = 0xFF00BFFF;
+        /** Registry id string, e.g. "minecraft:overworld" */
+        public String dimension = "minecraft:overworld";
+        public boolean enabled = true;
+    }
+    // ==================
 
     public static SkywaveConfig get() {
         if (INSTANCE == null) load();
@@ -134,6 +223,9 @@ public class SkywaveConfig {
             INSTANCE = new SkywaveConfig();
             save();
         }
+
+        if (INSTANCE == null) INSTANCE = new SkywaveConfig();
+        INSTANCE.fixup();
     }
 
     public static void save() {
@@ -146,5 +238,20 @@ public class SkywaveConfig {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    private void fixup() {
+        if (mobHighlightNametags == null) mobHighlightNametags = new ArrayList<>();
+
+        if (hunting == null) hunting = new HuntingConfig();
+        if (hunting.chatPatterns == null) hunting.chatPatterns = new ArrayList<>();
+        if (hunting.huntingTotals == null) hunting.huntingTotals = new HashMap<>();
+        if (hunting.shardRarityRgb == null) hunting.shardRarityRgb = new HashMap<>();
+        if (hunting.shardRarityWeight == null) hunting.shardRarityWeight = new HashMap<>();
+
+        if (crystalNucleus == null) crystalNucleus = new CrystalNucleusConfig();
+
+        if (waypoints == null) waypoints = new WaypointsConfig();
+        waypoints.fixup();
     }
 }

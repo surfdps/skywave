@@ -23,7 +23,8 @@ public class RainReminderHandler {
             // CHAT уведомление
             if (SkywaveConfig.get().rainReminderType == SkywaveConfig.RainReminderType.CHAT) {
                 client.player.sendMessage(
-                        Text.literal("[Skywave] Rain is over, go to Vanessa!").formatted(Formatting.AQUA),
+                        SkywaveClient.prefix()
+                                .append(Text.literal("Rain is over, go to Vanessa!").formatted(Formatting.AQUA, Formatting.BOLD)),
                         false
                 );
             }

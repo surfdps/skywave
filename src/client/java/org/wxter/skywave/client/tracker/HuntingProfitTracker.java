@@ -70,7 +70,6 @@ public class HuntingProfitTracker {
     private volatile double cachedCoinsPerHour = 0.0;
     private volatile long cachedCoinsPerHourAt = 0L;
 
-    private boolean moveMode = false;
     private boolean lastLeftWasDown = false;
 
     private HudBounds lastHudBounds = new HudBounds(0, 0, 0, 0);
@@ -147,7 +146,7 @@ public class HuntingProfitTracker {
         if (raw == null) return;
         SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
         if (cfg == null || !cfg.profitTrackerEnabled || !trackerState.isRunning()) return;
-        if (!moveMode && !HypixelSkyblockContext.isOnHypixelSkyblock()) return;
+        if (!HypixelSkyblockContext.isOnHypixelSkyblock()) return;
 
         String plain = stripColorCodes(raw).trim();
         if (plain.isEmpty()) return;
@@ -555,11 +554,25 @@ public class HuntingProfitTracker {
 
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null) return;
-        if (!moveMode && !HypixelSkyblockContext.isOnHypixelSkyblock(client)) return;
+        if (!HypixelSkyblockContext.isOnHypixelSkyblock(client)) return;
 
-        if (!moveMode && client.currentScreen != null) return;
-        boolean allowClicks = !moveMode;
+        // Only render on the main HUD (no screens). Screen overlays are handled by onScreenRender().
+        if (client.currentScreen != null) return;
+        boolean allowClicks = false;
         boolean showControls = false;
+        drawHud(ctx, cfg, client, allowClicks, showControls);
+    }
+
+    public void renderMovePreview(DrawContext ctx) {
+        SkywaveConfig.HuntingConfig cfg = SkywaveConfig.get().hunting;
+        if (cfg == null || !cfg.profitTrackerEnabled) return;
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.player == null) return;
+
+        // In the Move GUI we want a stable preview regardless of server/world state.
+        boolean allowClicks = false;
+        boolean showControls = true;
         drawHud(ctx, cfg, client, allowClicks, showControls);
     }
 
@@ -570,15 +583,15 @@ public class HuntingProfitTracker {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null || client.player == null) return;
         if (client.currentScreen == null) return;
-        if (!moveMode && !HypixelSkyblockContext.isOnHypixelSkyblock(client)) return;
+        if (!HypixelSkyblockContext.isOnHypixelSkyblock(client)) return;
 
         // Render only on "in-game" screens where a HUD overlay makes sense:
         // inventory/container (controls), or chat (no controls). Avoid config/mod menus.
         boolean isInventory = client.currentScreen instanceof HandledScreen<?>;
         boolean isChat = client.currentScreen instanceof ChatScreen;
-        if (!moveMode && !isInventory && !isChat) return;
+        if (!isInventory && !isChat) return;
 
-        boolean allowClicks = !moveMode;
+        boolean allowClicks = isInventory;
         boolean showControls = isInventory;
         drawHud(ctx, cfg, client, allowClicks, showControls);
     }
@@ -998,15 +1011,6 @@ public class HuntingProfitTracker {
             }
         }
         lastLeftWasDown = leftDown;
-    }
-
-    public void enableMoveMode() {
-        moveMode = true;
-    }
-
-    public void disableMoveMode() {
-        moveMode = false;
-        SkywaveConfig.save();
     }
 
     public HudBounds getHudBounds() {

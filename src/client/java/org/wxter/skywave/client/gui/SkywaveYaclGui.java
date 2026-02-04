@@ -125,6 +125,96 @@ public class SkywaveYaclGui {
                             .build())
 
                         .group(OptionGroup.createBuilder()
+                                .name(Text.literal("Custom Waypoints"))
+                                .option(Option.<Boolean>createBuilder()
+                                        .name(Text.literal("Enable Custom Waypoints"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "Create and render custom world waypoints (name + coords + color).\n\n" +
+                                                        "Renders are client-side only and do not automate gameplay."
+                                        )))
+                                        .binding(
+                                                false,
+                                                () -> SkywaveConfig.get().waypoints.enabled,
+                                                v -> SkywaveConfig.get().waypoints.enabled = v
+                                        )
+                                        .controller(TickBoxControllerBuilder::create)
+                                        .build())
+
+                                .option(Option.<Boolean>createBuilder()
+                                        .name(Text.literal("Show distance"))
+                                        .description(OptionDescription.of(Text.literal("Show distance below the waypoint name.")))
+                                        .binding(
+                                                true,
+                                                () -> SkywaveConfig.get().waypoints.showDistance,
+                                                v -> SkywaveConfig.get().waypoints.showDistance = v
+                                        )
+                                        .controller(TickBoxControllerBuilder::create)
+                                        .build())
+
+                                .option(Option.<Boolean>createBuilder()
+                                        .name(Text.literal("Highlight block in FOV"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "When a waypoint is in your field of view, highlight its target block with the waypoint color."
+                                        )))
+                                        .binding(
+                                                true,
+                                                () -> SkywaveConfig.get().waypoints.highlightBlockInFov,
+                                                v -> SkywaveConfig.get().waypoints.highlightBlockInFov = v
+                                        )
+                                        .controller(TickBoxControllerBuilder::create)
+                                        .build())
+
+                                .option(Option.<Boolean>createBuilder()
+                                        .name(Text.literal("Only same dimension"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "Only render waypoints in the same dimension they were created in."
+                                        )))
+                                        .binding(
+                                                true,
+                                                () -> SkywaveConfig.get().waypoints.onlySameDimension,
+                                                v -> SkywaveConfig.get().waypoints.onlySameDimension = v
+                                        )
+                                        .controller(TickBoxControllerBuilder::create)
+                                        .build())
+
+                                .option(Option.<Boolean>createBuilder()
+                                        .name(Text.literal("Parse coordinates from chat"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "Detect messages containing coordinates and offer to create a new waypoint.\n\n" +
+                                                        "This is client-side only and does not automate gameplay."
+                                        )))
+                                        .binding(
+                                                false,
+                                                () -> SkywaveConfig.get().waypoints.chatParsingEnabled,
+                                                v -> SkywaveConfig.get().waypoints.chatParsingEnabled = v
+                                        )
+                                        .controller(TickBoxControllerBuilder::create)
+                                        .build())
+
+                                .option(Option.<SkywaveConfig.WaypointChatParseChannel>createBuilder()
+                                        .name(Text.literal("Chat channel to parse"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "Choose which chat channel is scanned for coordinates.\n\n" +
+                                                        "ALL: public chat\n" +
+                                                        "PARTY: party chat"
+                                        )))
+                                        .binding(
+                                                SkywaveConfig.WaypointChatParseChannel.ALL,
+                                                () -> SkywaveConfig.get().waypoints.chatParseChannel,
+                                                (SkywaveConfig.WaypointChatParseChannel c) -> SkywaveConfig.get().waypoints.chatParseChannel = c
+                                        )
+                                        .controller(opt -> EnumControllerBuilder.create(opt).enumClass(SkywaveConfig.WaypointChatParseChannel.class))
+                                        .build())
+
+                                .option(ButtonOption.createBuilder()
+                                        .name(Text.literal("Manage Waypoints"))
+                                        .text(Text.literal("Open"))
+                                        .description(OptionDescription.of(Text.literal("Create, edit, delete waypoints and presets.")))
+                                        .action((screen, opt) -> MinecraftClient.getInstance().setScreen(new CustomWaypointsScreen(screen)))
+                                        .build())
+                                .build())
+
+                        .group(OptionGroup.createBuilder()
                                 .name(Text.literal("HUD"))
                                 .option(Option.<Boolean>createBuilder()
                                         .name(Text.literal("HUD background panels"))
@@ -135,6 +225,27 @@ public class SkywaveYaclGui {
                                                 true,
                                                 () -> SkywaveConfig.get().hudBackgroundPanelsEnabled,
                                                 v -> SkywaveConfig.get().hudBackgroundPanelsEnabled = v
+                                        )
+                                        .controller(TickBoxControllerBuilder::create)
+                                        .build())
+                                .build())
+                        .build())
+
+                // Crystal Nucleus Category
+                .category(ConfigCategory.createBuilder()
+                        .name(Text.literal("Crystal Nucleus"))
+                        .group(OptionGroup.createBuilder()
+                                .name(Text.literal("Jungle Skip Waypoints"))
+                                .option(Option.<Boolean>createBuilder()
+                                        .name(Text.literal("Enable Jungle Skip Waypoints"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "Adds a helper command to create temporary waypoints for the Jungle Skip.\n\n" +
+                                                        "Use: /sw jungleskip"
+                                        )))
+                                        .binding(
+                                                false,
+                                                () -> SkywaveConfig.get().crystalNucleus.jungleSkipWaypointsEnabled,
+                                                v -> SkywaveConfig.get().crystalNucleus.jungleSkipWaypointsEnabled = v
                                         )
                                         .controller(TickBoxControllerBuilder::create)
                                         .build())
