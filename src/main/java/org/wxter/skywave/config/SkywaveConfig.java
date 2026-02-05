@@ -43,6 +43,13 @@ public class SkywaveConfig {
         PARTY
     }
 
+    public enum NightSquidAlertSound {
+        ANVIL,
+        BELL,
+        PLING,
+        ORB
+    }
+
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("skywave.json");
 
@@ -52,6 +59,7 @@ public class SkywaveConfig {
     public boolean rainReminderEnabled = true;
     public boolean rainReminderSound = true;
     public RainReminderType rainReminderType = RainReminderType.CHAT;
+    public NightSquidAlertSound nightSquidAlertSound = NightSquidAlertSound.ANVIL;
 
     public boolean mobHighlightEnabled = true;
     public List<String> mobHighlightNametags = new ArrayList<>(List.of("Night Squid"));
@@ -242,6 +250,8 @@ public class SkywaveConfig {
 
     private void fixup() {
         if (mobHighlightNametags == null) mobHighlightNametags = new ArrayList<>();
+
+        if (nightSquidAlertSound == null) nightSquidAlertSound = NightSquidAlertSound.ANVIL;
 
         if (hunting == null) hunting = new HuntingConfig();
         if (hunting.chatPatterns == null) hunting.chatPatterns = new ArrayList<>();
