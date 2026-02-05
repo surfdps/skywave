@@ -72,6 +72,20 @@ public class SkywaveYaclGui {
                                         .controller(TickBoxControllerBuilder::create)
                                         .build())
 
+                                .option(Option.<SkywaveConfig.NightSquidAlertSound>createBuilder()
+                                        .name(Text.literal("Night Squid Alert Sound"))
+                                        .description(OptionDescription.of(Text.literal(
+                                                "Choose the sound used for the Night Squid alert message. Default is anvil."
+                                        )))
+                                        .binding(
+                                                SkywaveConfig.NightSquidAlertSound.ANVIL,
+                                                () -> SkywaveConfig.get().nightSquidAlertSound,
+                                                v -> SkywaveConfig.get().nightSquidAlertSound = v
+                                        )
+                                        .controller(opt -> EnumControllerBuilder.create(opt)
+                                                .enumClass(SkywaveConfig.NightSquidAlertSound.class))
+                                        .build())
+
                                 .build()) // end Rain Reminder group
                         .build()) // end category
 

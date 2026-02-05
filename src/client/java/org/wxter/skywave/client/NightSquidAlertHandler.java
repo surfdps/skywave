@@ -3,8 +3,10 @@ package org.wxter.skywave.client;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.sound.PositionedSoundInstance;
+import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
+import org.wxter.skywave.config.SkywaveConfig;
 
 public final class NightSquidAlertHandler {
 
@@ -26,11 +28,21 @@ public final class NightSquidAlertHandler {
             if (client == null) return;
             client.getSoundManager().play(
                     PositionedSoundInstance.master(
-                            SoundEvents.BLOCK_ANVIL_LAND,
+                            resolveAlertSound(SkywaveConfig.get().nightSquidAlertSound),
                             1f
                     )
             );
         });
+    }
+
+    private static SoundEvent resolveAlertSound(SkywaveConfig.NightSquidAlertSound soundType) {
+        if (soundType == null) return SoundEvents.BLOCK_ANVIL_LAND;
+        return switch (soundType) {
+            case BELL -> SoundEvents.BLOCK_NOTE_BLOCK_BELL;
+            case PLING -> SoundEvents.BLOCK_NOTE_BLOCK_PLING;
+            case ORB -> SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP;
+            case ANVIL -> SoundEvents.BLOCK_ANVIL_LAND;
+        };
     }
 
     private static String stripColorCodes(String s) {

@@ -265,6 +265,15 @@ public class SkywaveClient implements ClientModInitializer {
                         )
                 )
 
+                .then(literal("nightsquid")
+                        .then(literal("sound")
+                                .then(literal("anvil").executes(ctx -> setNightSquidAlertSound(SkywaveConfig.NightSquidAlertSound.ANVIL)))
+                                .then(literal("bell").executes(ctx -> setNightSquidAlertSound(SkywaveConfig.NightSquidAlertSound.BELL)))
+                                .then(literal("pling").executes(ctx -> setNightSquidAlertSound(SkywaveConfig.NightSquidAlertSound.PLING)))
+                                .then(literal("orb").executes(ctx -> setNightSquidAlertSound(SkywaveConfig.NightSquidAlertSound.ORB)))
+                        )
+                )
+
                 // Mob Highlight
                 .then(literal("mobhighlight")
                         .then(literal("on").executes(ctx -> setConfigBool("Mob Highlight", true, () -> SkywaveConfig.get().mobHighlightEnabled, v -> SkywaveConfig.get().mobHighlightEnabled = v)))
@@ -374,6 +383,13 @@ public class SkywaveClient implements ClientModInitializer {
         return 1;
     }
 
+    private static int setNightSquidAlertSound(SkywaveConfig.NightSquidAlertSound sound) {
+        SkywaveConfig.get().nightSquidAlertSound = sound;
+        SkywaveConfig.save();
+        sendFeedback("Night Squid alert sound: " + sound.name());
+        return 1;
+    }
+
     private static int handleJungleSkipCommand() {
         if (!SkywaveConfig.get().crystalNucleus.jungleSkipWaypointsEnabled) {
             sendFeedback("The Jungle Skip Waypoints feature is not enabled. Go to the mod settings and enable it.");
@@ -426,6 +442,7 @@ public class SkywaveClient implements ClientModInitializer {
             new HelpEntry("/sw rainreminder type chat|onscreen", "Set reminder type."),
 
             new HelpEntry("/sw rainreminder sound on|off", "Toggle Rain Reminder sound."),
+            new HelpEntry("/sw nightsquid sound anvil|bell|pling|orb", "Set Night Squid alert sound."),
             new HelpEntry("/sw mobhighlight on|off", "Enable/disable Mob Highlight."),
             new HelpEntry("/sw mobhighlight add <name>", "Add a mob name to highlight (supports spaces)."),
             new HelpEntry("/sw mobhighlight remove <name>", "Remove a mob name from highlight list."),
