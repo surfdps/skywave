@@ -52,6 +52,7 @@ public class SkywaveClient implements ClientModInitializer {
 
         HuntingProfitTracker.INSTANCE.init();
         WaypointChatParser.init();
+        NightSquidAlertHandler.init();
 
         // tick handler for queued GUI open
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
