@@ -38,8 +38,8 @@ public final class NightSquidAlertHandler {
     private static SoundEvent resolveAlertSound(SkywaveConfig.NightSquidAlertSound soundType) {
         if (soundType == null) return SoundEvents.BLOCK_ANVIL_LAND;
         return switch (soundType) {
-            case BELL -> SoundEvents.BLOCK_NOTE_BLOCK_BELL;
-            case PLING -> SoundEvents.BLOCK_NOTE_BLOCK_PLING;
+            case BELL -> SoundEvents.BLOCK_NOTE_BLOCK_BELL.value();
+            case PLING -> SoundEvents.BLOCK_NOTE_BLOCK_PLING.value();
             case ORB -> SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP;
             case ANVIL -> SoundEvents.BLOCK_ANVIL_LAND;
         };
