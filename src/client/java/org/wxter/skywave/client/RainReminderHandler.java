@@ -31,7 +31,7 @@ public class RainReminderHandler {
 
             // ONSCREEN уведомление
             if (SkywaveConfig.get().rainReminderType == SkywaveConfig.RainReminderType.ONSCREEN) {
-                RainOverlayRenderer.show(Text.literal("Rain was ended!"), 60);
+                RainOverlayRenderer.show(Text.literal("Rain has ended!"), 60);
             }
 
             // Звук
