@@ -61,12 +61,20 @@ public final class EntityHighlightHelper {
         World world = entity.getEntityWorld();
         if (world != null) {
             Box box = entity.getBoundingBox();
+            if (!isFiniteBox(box)) {
+                return null;
+            }
             Box search = new Box(
                     box.minX - 0.5, box.minY, box.minZ - 0.5,
                     box.maxX + 0.5, box.maxY + 3.0, box.maxZ + 0.5
             );
 
-            List<ArmorStandEntity> stands = world.getEntitiesByClass(ArmorStandEntity.class, search, e -> true);
+            List<ArmorStandEntity> stands;
+            try {
+                stands = world.getEntitiesByClass(ArmorStandEntity.class, search, e -> true);
+            } catch (RuntimeException e) {
+                stands = List.of();
+            }
             ArmorStandEntity best = null;
             double bestScore = Double.MAX_VALUE;
             // center of entity for horizontal proximity checks
@@ -118,5 +126,14 @@ public final class EntityHighlightHelper {
         }
 
         return entity.getName().getString();
+    }
+
+    private static boolean isFiniteBox(Box box) {
+        return Double.isFinite(box.minX)
+                && Double.isFinite(box.minY)
+                && Double.isFinite(box.minZ)
+                && Double.isFinite(box.maxX)
+                && Double.isFinite(box.maxY)
+                && Double.isFinite(box.maxZ);
     }
 }
