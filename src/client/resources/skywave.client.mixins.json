@@ -6,7 +6,8 @@
   "client": [
     "MixinMinecraftClient",
     "MixinEntityOutlineColor",
-    "MixinMouse"
+    "MixinMouse",
+    "MixinSoundManager"
   ],
   "injectors": {
     "defaultRequire": 1
