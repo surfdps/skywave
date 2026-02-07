@@ -13,7 +13,12 @@ import org.wxter.skywave.config.SkywaveConfig;
 public class MixinSoundManager {
     private static final Set<String> MUTED_DRAGON_SOUND_PATHS = Set.of(
             "mob.enderdragon.growl",
-            "mob.enderdragon.wings"
+            "mob.enderdragon.wings",
+            "entity.ender_dragon.growl",
+            "entity.ender_dragon.flap",
+            "entity.ender_dragon.ambient",
+            "entity.ender_dragon.hurt",
+            "entity.ender_dragon.death"
     );
 
     @Inject(method = "play", at = @At("HEAD"), cancellable = true)
