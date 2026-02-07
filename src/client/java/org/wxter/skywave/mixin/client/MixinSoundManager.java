@@ -7,21 +7,17 @@ import net.minecraft.util.Identifier;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.wxter.skywave.config.SkywaveConfig;
 
 @Mixin(SoundManager.class)
 public class MixinSoundManager {
     private static final Set<String> MUTED_DRAGON_SOUND_PATHS = Set.of(
             "mob.enderdragon.growl",
-            "mob.enderdragon.wings",
-            "entity.ender_dragon.growl",
-            "entity.ender_dragon.flap",
-            "entity.ender_dragon.wings"
+            "mob.enderdragon.wings"
     );
 
     @Inject(method = "play", at = @At("HEAD"), cancellable = true)
-    private void skywave$muteEnderDragonSounds(SoundInstance sound, CallbackInfo ci) {
+    private void skywave$muteEnderDragonSounds(SoundInstance sound, org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
         if (!SkywaveConfig.get().muteEnderDragonSounds) return;
 
         Identifier id = sound.getId();
@@ -29,7 +25,8 @@ public class MixinSoundManager {
 
         if (MUTED_DRAGON_SOUND_PATHS.contains(id.getPath())
                 || MUTED_DRAGON_SOUND_PATHS.contains(id.toString())) {
-            ci.cancel();
+            cir.setReturnValue(false);
+            cir.cancel();
         }
     }
 }
