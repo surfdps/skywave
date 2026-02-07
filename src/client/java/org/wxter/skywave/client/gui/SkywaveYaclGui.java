@@ -128,7 +128,7 @@ public class SkywaveYaclGui {
                             .option(Option.<Boolean>createBuilder()
                                     .name(Text.literal("Mute Ender Dragon Sounds"))
                                     .description(OptionDescription.of(Text.literal(
-                                            "Mute mob.enderdragon.growl and mob.enderdragon.wings."
+                                            "Mute Ender Dragon growl/flap/ambient/hurt/death sounds."
                                     )))
                                     .binding(
                                             false,
