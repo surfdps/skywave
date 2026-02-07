@@ -60,6 +60,7 @@ public class SkywaveConfig {
     public boolean rainReminderSound = true;
     public RainReminderType rainReminderType = RainReminderType.CHAT;
     public NightSquidAlertSound nightSquidAlertSound = NightSquidAlertSound.ANVIL;
+    public boolean muteEnderDragonSounds = false;
 
     public boolean mobHighlightEnabled = true;
     public List<String> mobHighlightNametags = new ArrayList<>(List.of("Night Squid"));
