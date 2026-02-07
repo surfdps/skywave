@@ -28,10 +28,5 @@
   "mixins": [
     "skywave.mixins.json",
     "skywave.client.mixins.json"
-  ],
-  "client": {
-    "mixins": [
-      "skywave.client.mixins.json"
-    ]
-  }
+  ]
 }
