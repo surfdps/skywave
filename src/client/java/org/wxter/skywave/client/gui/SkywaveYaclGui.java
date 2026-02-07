@@ -123,6 +123,22 @@ public class SkywaveYaclGui {
 
                             .build()) // end Mob Highlight group
 
+                    .group(OptionGroup.createBuilder()
+                            .name(Text.literal("Sound Filters"))
+                            .option(Option.<Boolean>createBuilder()
+                                    .name(Text.literal("Mute Ender Dragon Sounds"))
+                                    .description(OptionDescription.of(Text.literal(
+                                            "Mute mob.enderdragon.growl and mob.enderdragon.wings."
+                                    )))
+                                    .binding(
+                                            false,
+                                            () -> SkywaveConfig.get().muteEnderDragonSounds,
+                                            v -> SkywaveConfig.get().muteEnderDragonSounds = v
+                                    )
+                                    .controller(TickBoxControllerBuilder::create)
+                                    .build())
+                            .build())
+
                     // ListOption must be added directly to category (not inside a group)
                     .option(ListOption.<String>createBuilder()
                             .name(Text.literal("Nametags to Highlight"))
